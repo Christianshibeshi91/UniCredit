@@ -54,6 +54,30 @@ class ApiService {
     return {'statusCode': resp.statusCode, ...data};
   }
 
+  /// Google Sign-In: send Google ID token to backend for verification + login/register
+  static Future<Map<String, dynamic>> googleSignIn({
+    required String idToken,
+    required String email,
+    String? displayName,
+    String? photoUrl,
+  }) async {
+    final resp = await http.post(
+      Uri.parse('$baseUrl/api/auth/google'),
+      headers: {'Content-Type': 'application/json'},
+      body: json.encode({
+        'idToken': idToken,
+        'email': email,
+        'displayName': displayName,
+        'photoUrl': photoUrl,
+      }),
+    );
+    final data = json.decode(resp.body);
+    if (resp.statusCode == 200 && data['token'] != null) {
+      _authToken = data['token'];
+    }
+    return {'statusCode': resp.statusCode, ...data};
+  }
+
   static Future<Map<String, dynamic>?> getCurrentUser() async {
     if (_authToken == null) return null;
     try {

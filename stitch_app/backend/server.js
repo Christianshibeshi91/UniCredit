@@ -267,6 +267,7 @@ function authMiddleware(req, res, next) {
     const publicPaths = [
         '/auth/login',
         '/auth/register',
+        '/auth/google',
         '/stripe/webhook',
         '/stripe/success',
         '/stripe/cancel',
@@ -456,6 +457,126 @@ app.post('/api/auth/login', authRateLimit, async (req, res) => {
     } catch (err) {
         console.error('Login error:', err.message);
         res.status(500).json({ error: 'Login failed. Please try again.' });
+    }
+});
+
+// POST /api/auth/google — Google Sign-In
+app.post('/api/auth/google', authRateLimit, async (req, res) => {
+    try {
+        const { idToken, email, displayName, photoUrl } = req.body;
+        if (!idToken || !email) {
+            return res.status(400).json({ error: 'Google ID token and email required' });
+        }
+        if (!EMAIL_REGEX.test(email)) {
+            return res.status(400).json({ error: 'Invalid email format' });
+        }
+
+        // Verify Google ID token via Google's tokeninfo endpoint
+        let verified = false;
+        try {
+            const https = require('https');
+            const verifyResult = await new Promise((resolve, reject) => {
+                https.get(`https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(idToken)}`, (resp) => {
+                    let data = '';
+                    resp.on('data', chunk => data += chunk);
+                    resp.on('end', () => {
+                        try {
+                            resolve(JSON.parse(data));
+                        } catch {
+                            reject(new Error('Invalid response'));
+                        }
+                    });
+                }).on('error', reject);
+            });
+
+            if (verifyResult.email && verifyResult.email.toLowerCase() === email.toLowerCase()) {
+                verified = true;
+            }
+        } catch (verifyErr) {
+            console.error('Google token verification error:', verifyErr.message);
+        }
+
+        // If Firebase Admin is available, also try verifying through Firebase
+        if (!verified && firebaseEnabled && admin) {
+            try {
+                const decodedToken = await admin.auth().verifyIdToken(idToken);
+                if (decodedToken.email && decodedToken.email.toLowerCase() === email.toLowerCase()) {
+                    verified = true;
+                }
+            } catch (fbErr) {
+                console.log('Firebase token verification fallback failed:', fbErr.message);
+            }
+        }
+
+        if (!verified) {
+            return res.status(401).json({ error: 'Google authentication failed' });
+        }
+
+        // Check if user exists
+        let user = await getUserByEmail(email);
+        let userId;
+
+        if (user) {
+            // Existing user — log them in
+            userId = user.id;
+        } else {
+            // New user — create account
+            const safeName = sanitizeString(displayName || email.split('@')[0]);
+
+            if (firebaseEnabled) {
+                try {
+                    const authUser = await admin.auth().getUserByEmail(email);
+                    userId = authUser.uid;
+                } catch {
+                    const authUser = await admin.auth().createUser({
+                        email,
+                        displayName: safeName,
+                    });
+                    userId = authUser.uid;
+                }
+
+                await db.collection('users').doc(userId).set({
+                    name: safeName,
+                    email,
+                    password_hash: '', // Google auth — no password
+                    balance: 0,
+                    tier: 'STANDARD',
+                    role: 'user',
+                    photo_url: photoUrl || '',
+                    auth_provider: 'google',
+                    created_at: new Date().toISOString(),
+                    updated_at: new Date().toISOString(),
+                });
+            } else {
+                userId = `user_${Date.now()}`;
+                inMemoryUsers[userId] = {
+                    id: userId,
+                    name: sanitizeString(displayName || email.split('@')[0]),
+                    email,
+                    password_hash: '',
+                    balance: 0,
+                    tier: 'STANDARD',
+                    role: 'user',
+                    photo_url: photoUrl || '',
+                    auth_provider: 'google',
+                    created_at: new Date().toISOString(),
+                    updated_at: new Date().toISOString(),
+                };
+            }
+
+            user = await getUser(userId);
+        }
+
+        const token = generateToken(userId, user.role || 'user');
+        const { password_hash, ...safeUser } = user;
+
+        res.json({
+            token,
+            user: { id: userId, ...safeUser },
+        });
+    } catch (err) {
+        console.error('Google auth error:', err.message);
+        res.status(500).json({ error: 'Google authentication failed. Please try again.' });
     }
 });
 

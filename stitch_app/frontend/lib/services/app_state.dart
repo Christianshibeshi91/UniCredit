@@ -109,6 +109,42 @@ class AppState extends ChangeNotifier {
     return result['error'] ?? 'Registration failed';
   }
 
+  /// Log in with Google ID token via the backend.
+  Future<String?> loginWithGoogle({
+    required String idToken,
+    required String email,
+    String? displayName,
+    String? photoUrl,
+  }) async {
+    final result = await ApiService.googleSignIn(
+      idToken: idToken,
+      email: email,
+      displayName: displayName,
+      photoUrl: photoUrl,
+    );
+
+    if (result['statusCode'] == 200 && result['token'] != null) {
+      final user = result['user'] as Map<String, dynamic>;
+      _userId = user['id'] ?? '';
+      _userName = user['name'] ?? '';
+      _userEmail = user['email'] ?? '';
+      _tier = user['tier'] ?? 'STANDARD';
+      _balance = (user['balance'] as num?)?.toDouble() ?? 0.0;
+      _isAdmin = user['role'] == 'admin';
+      _isLoggedIn = true;
+
+      // Persist token
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('auth_token', result['token']);
+
+      await _loadTransactions();
+      notifyListeners();
+      return null; // No error
+    }
+
+    return result['error'] ?? 'Google sign-in failed';
+  }
+
   void setUser({
     required String userId,
     required String userName,
