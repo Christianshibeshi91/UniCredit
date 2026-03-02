@@ -6,7 +6,7 @@ import '../services/app_state.dart';
 import '../theme/app_theme.dart';
 
 const String _kGoogleClientId =
-    '100377416756-86adf1f2dhm9ga2td60gcjd3jg2ho34g.apps.googleusercontent.com';
+    '100377416756-nqs3k3jn8k47a1q8t1kvoka7ief8egkf.apps.googleusercontent.com';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
