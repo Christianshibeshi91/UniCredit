@@ -1,0 +1,30 @@
+name: stitch_app
+description: Stitch – Gift Wallet App powered by Firebase & Stripe
+version: 2.0.0+1
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.6
+  google_fonts: ^8.0.2
+  http: ^1.1.0
+  firebase_core: ^3.0.0
+  firebase_auth: ^5.0.0
+  cloud_firestore: ^5.0.0
+  url_launcher: ^6.3.2
+  shared_preferences: ^2.5.4
+  intl: ^0.20.2
+  flutter_animate: ^4.5.2
+  lottie: ^3.1.0
+  cached_network_image: ^3.4.1
+  provider: ^6.1.5+1
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true

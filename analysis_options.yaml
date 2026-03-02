@@ -1,0 +1,6 @@
+analyzer:
+  exclude:
+    - "**/node_modules/**"
+    - "**/backend/**"
+    - "**/*.js"
+    - "**/*.d.ts"
