@@ -5,6 +5,9 @@ import 'package:provider/provider.dart';
 import '../services/app_state.dart';
 import '../theme/app_theme.dart';
 
+const String _kGoogleClientId =
+    '100377416756-86adf1f2dhm9ga2td60gcjd3jg2ho34g.apps.googleusercontent.com';
+
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
 
@@ -27,6 +30,7 @@ class _LoginScreenState extends State<LoginScreen>
   late Animation<double> _fade;
 
   final GoogleSignIn _googleSignIn = GoogleSignIn(
+    clientId: _kGoogleClientId,
     scopes: ['email', 'profile'],
   );
 

@@ -102,17 +102,20 @@ class _PersonalizeYourGiftScreenState extends State<PersonalizeYourGiftScreen> {
   }
 
   Future<void> _handleRecordVideo() async {
+    final scaffold = ScaffoldMessenger.of(context);
     try {
       final picker = ImagePicker();
+      // On web, camera source isn't supported for video — use gallery (file picker)
+      const source = kIsWeb ? ImageSource.gallery : ImageSource.camera;
       final XFile? video = await picker.pickVideo(
-        source: ImageSource.camera,
+        source: source,
         maxDuration: const Duration(seconds: 30),
       );
       if (video != null && mounted) {
         setState(() => _videoFileName = video.name);
-        ScaffoldMessenger.of(context).showSnackBar(
+        scaffold.showSnackBar(
           SnackBar(
-            content: Text('Video recorded: ${video.name}'),
+            content: Text('Video added: ${video.name}'),
             backgroundColor: const Color(0xFF16A34A),
             behavior: SnackBarBehavior.floating,
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
@@ -121,7 +124,7 @@ class _PersonalizeYourGiftScreenState extends State<PersonalizeYourGiftScreen> {
       }
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
+      scaffold.showSnackBar(
         SnackBar(
           content: const Text('Could not access camera. Please grant permission.'),
           backgroundColor: const Color(0xFFDC2626),
@@ -596,6 +599,7 @@ class _PersonalizeYourGiftScreenState extends State<PersonalizeYourGiftScreen> {
             // Record Video card
             Expanded(
               child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
                 onTap: _handleRecordVideo,
                 child: Container(
                   padding: const EdgeInsets.all(16),
@@ -650,6 +654,7 @@ class _PersonalizeYourGiftScreenState extends State<PersonalizeYourGiftScreen> {
             // Upload Audio card
             Expanded(
               child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
                 onTap: _handleAudioRecord,
                 child: Container(
                   padding: const EdgeInsets.all(16),
