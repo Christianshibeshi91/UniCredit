@@ -103,6 +103,65 @@ class _LoginScreenState extends State<LoginScreen>
     }
   }
 
+  void _showForgotPasswordDialog() {
+    final resetEmailCtrl = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text('Reset Password',
+            style: GoogleFonts.manrope(fontWeight: FontWeight.w700)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              'Enter your email and we\'ll send you instructions to reset your password.',
+              style: GoogleFonts.manrope(
+                  fontSize: 13, color: AppColors.textSecondary),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: resetEmailCtrl,
+              keyboardType: TextInputType.emailAddress,
+              decoration: InputDecoration(
+                hintText: 'Email address',
+                prefixIcon: const Icon(Icons.email_outlined, size: 20),
+                border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12)),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text('Cancel',
+                style: GoogleFonts.manrope(color: AppColors.textSecondary)),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              if (resetEmailCtrl.text.trim().isNotEmpty) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  AppWidgets.successSnackBar(
+                      'If that email exists, reset instructions have been sent.'),
+                );
+              }
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.primary,
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10)),
+            ),
+            child: Text('Send Reset Link',
+                style: GoogleFonts.manrope(
+                    color: Colors.white, fontWeight: FontWeight.w600)),
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _handleGoogleSignIn() async {
     // Capture appState before async gap
     final appState = Provider.of<AppState>(context, listen: false);
@@ -253,9 +312,7 @@ class _LoginScreenState extends State<LoginScreen>
                           _buildLabel('PASSWORD'),
                           if (!_isRegisterMode)
                             GestureDetector(
-                              onTap: () {
-                                // TODO: Forgot password flow
-                              },
+                              onTap: _showForgotPasswordDialog,
                               child: Text(
                                 'Forgot?',
                                 style: GoogleFonts.manrope(
