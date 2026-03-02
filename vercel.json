@@ -1,0 +1,7 @@
+{
+  "outputDirectory": "stitch_app/frontend/build/web",
+  "framework": null,
+  "rewrites": [
+    { "source": "/(.*)", "destination": "/index.html" }
+  ]
+}
