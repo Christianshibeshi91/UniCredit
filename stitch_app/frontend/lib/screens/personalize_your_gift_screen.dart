@@ -1,6 +1,10 @@
+import 'dart:async';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
+import 'package:record/record.dart';
 
 import '../services/app_state.dart';
 import '../services/api_service.dart';
@@ -22,6 +26,14 @@ class _PersonalizeYourGiftScreenState extends State<PersonalizeYourGiftScreen> {
   final _customOccasionController = TextEditingController();
   final _customOccasionFocus = FocusNode();
   bool _isSending = false;
+
+  // Video & Audio state
+  String? _videoFileName;
+  String? _audioFileName;
+  bool _isRecordingAudio = false;
+  int _audioSeconds = 0;
+  Timer? _audioTimer;
+  final AudioRecorder _audioRecorder = AudioRecorder();
 
   final List<Map<String, dynamic>> _occasions = [
     {
@@ -75,6 +87,110 @@ class _PersonalizeYourGiftScreenState extends State<PersonalizeYourGiftScreen> {
       'gradient': [const Color(0xFF64748B), const Color(0xFF475569)]
     },
   ];
+
+  @override
+  void dispose() {
+    _audioTimer?.cancel();
+    _audioRecorder.dispose();
+    _recipientController.dispose();
+    _amountController.dispose();
+    _messageController.dispose();
+    _dateController.dispose();
+    _customOccasionController.dispose();
+    _customOccasionFocus.dispose();
+    super.dispose();
+  }
+
+  Future<void> _handleRecordVideo() async {
+    try {
+      final picker = ImagePicker();
+      final XFile? video = await picker.pickVideo(
+        source: ImageSource.camera,
+        maxDuration: const Duration(seconds: 30),
+      );
+      if (video != null && mounted) {
+        setState(() => _videoFileName = video.name);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Video recorded: ${video.name}'),
+            backgroundColor: const Color(0xFF16A34A),
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+          ),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('Could not access camera. Please grant permission.'),
+          backgroundColor: const Color(0xFFDC2626),
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        ),
+      );
+    }
+  }
+
+  Future<void> _handleAudioRecord() async {
+    if (_isRecordingAudio) {
+      // Stop recording
+      final path = await _audioRecorder.stop();
+      _audioTimer?.cancel();
+      if (mounted) {
+        setState(() {
+          _isRecordingAudio = false;
+          if (path != null) {
+            _audioFileName = path.split('/').last.split('\\').last;
+          }
+        });
+        if (path != null) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Audio recorded: ${_audioSeconds}s'),
+              backgroundColor: const Color(0xFF16A34A),
+              behavior: SnackBarBehavior.floating,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            ),
+          );
+        }
+      }
+    } else {
+      // Check permission and start recording
+      final hasPermission = await _audioRecorder.hasPermission();
+      if (!hasPermission) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: const Text('Microphone permission is required to record audio.'),
+              backgroundColor: const Color(0xFFDC2626),
+              behavior: SnackBarBehavior.floating,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            ),
+          );
+        }
+        return;
+      }
+
+      // ignore: prefer_const_constructors
+      final config = RecordConfig(
+        encoder: kIsWeb ? AudioEncoder.opus : AudioEncoder.aacLc,
+        sampleRate: 44100,
+        bitRate: 128000,
+      );
+      await _audioRecorder.start(config, path: '');
+      setState(() {
+        _isRecordingAudio = true;
+        _audioSeconds = 0;
+      });
+      _audioTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+        if (mounted) {
+          setState(() => _audioSeconds++);
+          if (_audioSeconds >= 60) _handleAudioRecord(); // Auto-stop at 60s
+        }
+      });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -477,72 +593,130 @@ class _PersonalizeYourGiftScreenState extends State<PersonalizeYourGiftScreen> {
         const SizedBox(height: 14),
         Row(
           children: [
+            // Record Video card
             Expanded(
-              child: Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: const Color(0xFFE2E8F0)),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Container(
-                      width: 40,
-                      height: 40,
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF135BEC).withValues(alpha: 0.1),
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: const Icon(Icons.videocam_outlined,
-                          color: Color(0xFF135BEC), size: 22),
+              child: GestureDetector(
+                onTap: _handleRecordVideo,
+                child: Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: _videoFileName != null
+                        ? const Color(0xFF135BEC).withValues(alpha: 0.05)
+                        : Colors.white,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(
+                      color: _videoFileName != null
+                          ? const Color(0xFF135BEC)
+                          : const Color(0xFFE2E8F0),
                     ),
-                    const SizedBox(height: 10),
-                    Text('Record Video',
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Container(
+                        width: 40,
+                        height: 40,
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF135BEC).withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Icon(
+                          _videoFileName != null
+                              ? Icons.check_circle
+                              : Icons.videocam_outlined,
+                          color: const Color(0xFF135BEC),
+                          size: 22,
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      Text(
+                        _videoFileName != null ? 'Video Ready' : 'Record Video',
                         style: GoogleFonts.manrope(
                             fontSize: 12,
                             fontWeight: FontWeight.bold,
-                            color: const Color(0xFF0F172A))),
-                    Text('Auto-enhance',
+                            color: const Color(0xFF0F172A)),
+                      ),
+                      Text(
+                        _videoFileName != null ? 'Tap to re-record' : 'Auto-enhance',
                         style: GoogleFonts.manrope(
-                            fontSize: 10, color: const Color(0xFF64748B))),
-                  ],
+                            fontSize: 10, color: const Color(0xFF64748B)),
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ),
             const SizedBox(width: 12),
+            // Upload Audio card
             Expanded(
-              child: Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: const Color(0xFFE2E8F0)),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Container(
-                      width: 40,
-                      height: 40,
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF8B5CF6).withValues(alpha: 0.1),
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: const Icon(Icons.mic_outlined,
-                          color: Color(0xFF8B5CF6), size: 22),
+              child: GestureDetector(
+                onTap: _handleAudioRecord,
+                child: Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: _isRecordingAudio
+                        ? const Color(0xFFDC2626).withValues(alpha: 0.05)
+                        : _audioFileName != null
+                            ? const Color(0xFF8B5CF6).withValues(alpha: 0.05)
+                            : Colors.white,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(
+                      color: _isRecordingAudio
+                          ? const Color(0xFFDC2626)
+                          : _audioFileName != null
+                              ? const Color(0xFF8B5CF6)
+                              : const Color(0xFFE2E8F0),
                     ),
-                    const SizedBox(height: 10),
-                    Text('Upload Audio',
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Container(
+                        width: 40,
+                        height: 40,
+                        decoration: BoxDecoration(
+                          color: _isRecordingAudio
+                              ? const Color(0xFFDC2626).withValues(alpha: 0.1)
+                              : const Color(0xFF8B5CF6).withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Icon(
+                          _isRecordingAudio
+                              ? Icons.stop_circle
+                              : _audioFileName != null
+                                  ? Icons.check_circle
+                                  : Icons.mic_outlined,
+                          color: _isRecordingAudio
+                              ? const Color(0xFFDC2626)
+                              : const Color(0xFF8B5CF6),
+                          size: 22,
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      Text(
+                        _isRecordingAudio
+                            ? 'Recording ${_audioSeconds}s'
+                            : _audioFileName != null
+                                ? 'Audio Ready'
+                                : 'Record Audio',
                         style: GoogleFonts.manrope(
                             fontSize: 12,
                             fontWeight: FontWeight.bold,
-                            color: const Color(0xFF0F172A))),
-                    Text('Adjustable',
+                            color: _isRecordingAudio
+                                ? const Color(0xFFDC2626)
+                                : const Color(0xFF0F172A)),
+                      ),
+                      Text(
+                        _isRecordingAudio
+                            ? 'Tap to stop'
+                            : _audioFileName != null
+                                ? 'Tap to re-record'
+                                : 'Tap to start',
                         style: GoogleFonts.manrope(
-                            fontSize: 10, color: const Color(0xFF64748B))),
-                  ],
+                            fontSize: 10, color: const Color(0xFF64748B)),
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ),
