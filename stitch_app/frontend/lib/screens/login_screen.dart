@@ -301,50 +301,16 @@ class _LoginScreenState extends State<LoginScreen>
   Widget _buildTopBar() {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-      child: Row(
-        children: [
-          GestureDetector(
-            onTap: () {
-              if (_isRegisterMode) {
-                setState(() {
-                  _isRegisterMode = false;
-                  _error = null;
-                });
-              }
-            },
-            child: Container(
-              width: 40,
-              height: 40,
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(12),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.04),
-                    blurRadius: 8,
-                    offset: const Offset(0, 2),
-                  ),
-                ],
-              ),
-              child: const Icon(Icons.arrow_back_ios_new,
-                  size: 16, color: AppColors.textPrimary),
-            ),
+      child: Center(
+        child: Text(
+          'UniCredit',
+          style: GoogleFonts.manrope(
+            fontSize: 17,
+            fontWeight: FontWeight.w700,
+            color: AppColors.textPrimary,
+            letterSpacing: -0.3,
           ),
-          const Expanded(
-            child: Center(
-              child: Text(
-                'UniCredit',
-                style: TextStyle(
-                  fontSize: 17,
-                  fontWeight: FontWeight.w700,
-                  color: AppColors.textPrimary,
-                  letterSpacing: -0.3,
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(width: 40), // Balance the back button
-        ],
+        ),
       ),
     );
   }
@@ -605,6 +571,7 @@ class _LoginScreenState extends State<LoginScreen>
                 child: CircularProgressIndicator(strokeWidth: 2))
             : Row(
                 mainAxisAlignment: MainAxisAlignment.center,
+                mainAxisSize: MainAxisSize.min,
                 children: [
                   // Google "G" icon
                   SizedBox(
@@ -613,12 +580,15 @@ class _LoginScreenState extends State<LoginScreen>
                     child: CustomPaint(painter: _GoogleLogoPainter()),
                   ),
                   const SizedBox(width: 12),
-                  Text(
-                    'Continue with Google',
-                    style: GoogleFonts.manrope(
-                      fontSize: 15,
-                      fontWeight: FontWeight.w600,
-                      color: AppColors.textPrimary,
+                  Flexible(
+                    child: Text(
+                      'Continue with Google',
+                      overflow: TextOverflow.ellipsis,
+                      style: GoogleFonts.manrope(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.textPrimary,
+                      ),
                     ),
                   ),
                 ],
