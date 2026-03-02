@@ -82,7 +82,6 @@ class _ConvertGiftCardScreenState extends State<ConvertGiftCardScreen> {
     try {
       final appState = Provider.of<AppState>(context, listen: false);
       final result = await ApiService.convertGiftCard(
-        userId: appState.userId,
         merchant: _selectedMerchant,
         cardNumber: _cardNumberController.text,
         pin: _pinController.text,
@@ -116,9 +115,9 @@ class _ConvertGiftCardScreenState extends State<ConvertGiftCardScreen> {
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Error: $e'),
-          backgroundColor: const Color(0xFFDC2626),
+        const SnackBar(
+          content: Text('Something went wrong. Please try again.'),
+          backgroundColor: Color(0xFFDC2626),
         ),
       );
     } finally {

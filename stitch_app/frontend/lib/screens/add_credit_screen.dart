@@ -60,7 +60,6 @@ class _AddCreditScreenState extends State<AddCreditScreen> {
         // Try Stripe checkout
         final url = await ApiService.createCheckoutSession(
           priceId: priceId,
-          userId: appState.userId,
           userEmail: appState.userEmail,
         );
         if (url != null && mounted) {
@@ -78,7 +77,6 @@ class _AddCreditScreenState extends State<AddCreditScreen> {
 
       // Fallback: direct in-memory credit via convert endpoint
       await ApiService.convertGiftCard(
-        userId: appState.userId,
         merchant: 'Wallet Top-Up',
         cardNumber: 'TOPUP',
         pin: '',
@@ -96,9 +94,9 @@ class _AddCreditScreenState extends State<AddCreditScreen> {
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Error: $e'),
-          backgroundColor: const Color(0xFFDC2626),
+        const SnackBar(
+          content: Text('Something went wrong. Please try again.'),
+          backgroundColor: Color(0xFFDC2626),
         ),
       );
     } finally {

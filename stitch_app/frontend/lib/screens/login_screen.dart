@@ -50,8 +50,13 @@ class _LoginScreenState extends State<LoginScreen>
       return;
     }
 
-    if (_isRegisterMode && password.length < 6) {
-      setState(() => _error = 'Password must be at least 6 characters');
+    if (!email.contains('@') || !email.contains('.')) {
+      setState(() => _error = 'Please enter a valid email address');
+      return;
+    }
+
+    if (_isRegisterMode && password.length < 8) {
+      setState(() => _error = 'Password must be at least 8 characters');
       return;
     }
 
@@ -117,7 +122,6 @@ class _LoginScreenState extends State<LoginScreen>
                   const SizedBox(height: 48),
                   _buildCard(),
                   const SizedBox(height: 24),
-                  _buildDemoHint(),
                 ],
               ),
             ),
@@ -325,33 +329,4 @@ class _LoginScreenState extends State<LoginScreen>
     );
   }
 
-  Widget _buildDemoHint() {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.1),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.15)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text('Demo Accounts',
-              style: GoogleFonts.manrope(
-                  color: Colors.white,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 13)),
-          const SizedBox(height: 8),
-          Text('Admin: admin@unicredit.app / admin123',
-              style: GoogleFonts.manrope(color: Colors.white70, fontSize: 12)),
-          Text('User:  alex@example.com / demo123',
-              style: GoogleFonts.manrope(color: Colors.white70, fontSize: 12)),
-          const SizedBox(height: 8),
-          Text('Or register a new account!',
-              style: GoogleFonts.manrope(
-                  color: Colors.white54, fontSize: 11, fontStyle: FontStyle.italic)),
-        ],
-      ),
-    );
-  }
 }

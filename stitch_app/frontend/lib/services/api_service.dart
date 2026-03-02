@@ -62,6 +62,7 @@ class ApiService {
         headers: _headers,
       );
       if (resp.statusCode == 200) return json.decode(resp.body);
+      if (resp.statusCode == 401) _authToken = null; // Token expired
     } catch (_) {}
     return null;
   }
@@ -88,22 +89,6 @@ class ApiService {
       final resp = await http.get(
         Uri.parse('$baseUrl/api/users/$userId'),
         headers: _headers,
-      );
-      if (resp.statusCode == 200) return json.decode(resp.body);
-    } catch (_) {}
-    return null;
-  }
-
-  static Future<Map<String, dynamic>?> upsertUser({
-    required String uid,
-    required String email,
-    String? name,
-  }) async {
-    try {
-      final resp = await http.post(
-        Uri.parse('$baseUrl/api/users'),
-        headers: _headers,
-        body: json.encode({'uid': uid, 'email': email, 'name': name}),
       );
       if (resp.statusCode == 200) return json.decode(resp.body);
     } catch (_) {}
@@ -143,10 +128,10 @@ class ApiService {
     return [];
   }
 
-  // ─── Convert Gift Card ────────────────────────────────────────────────────
+  // ─── Convert Gift Card ─────────────────────────────────────────────────────
+  // Backend now uses authenticated user from JWT token (no userId in body)
 
   static Future<Map<String, dynamic>> convertGiftCard({
-    required String userId,
     required String merchant,
     required String cardNumber,
     required String pin,
@@ -156,7 +141,6 @@ class ApiService {
       Uri.parse('$baseUrl/api/convert'),
       headers: _headers,
       body: json.encode({
-        'userId': userId,
         'merchant': merchant,
         'cardNumber': cardNumber,
         'pin': pin,
@@ -167,9 +151,9 @@ class ApiService {
   }
 
   // ─── Send Gift ─────────────────────────────────────────────────────────────
+  // Backend now uses authenticated user as sender from JWT token
 
   static Future<Map<String, dynamic>> sendGift({
-    required String senderId,
     required String recipientEmail,
     required double amount,
     required String message,
@@ -179,7 +163,6 @@ class ApiService {
       Uri.parse('$baseUrl/api/gifts/send'),
       headers: _headers,
       body: json.encode({
-        'senderId': senderId,
         'recipientEmail': recipientEmail,
         'amount': amount,
         'message': message,
@@ -215,30 +198,18 @@ class ApiService {
         return data.cast<Map<String, dynamic>>();
       }
     } catch (_) {}
-    // Fallback prices
-    return [
-      {'id': 'price_1T62YYB6LLbnDewLfW9e0jur', 'amount': 10.0, 'label': r'$10'},
-      {'id': 'price_1T62YZB6LLbnDewLotUxaAgr', 'amount': 25.0, 'label': r'$25'},
-      {'id': 'price_1T62YZB6LLbnDewLPlD4cLq6', 'amount': 50.0, 'label': r'$50'},
-      {
-        'id': 'price_1T62YZB6LLbnDewLJUb8mHZg',
-        'amount': 100.0,
-        'label': r'$100'
-      },
-    ];
+    return [];
   }
 
   static Future<String?> createCheckoutSession({
     required String priceId,
-    required String userId,
     String? userEmail,
   }) async {
     try {
       final resp = await http.post(
         Uri.parse('$baseUrl/api/stripe/create-checkout-session'),
         headers: _headers,
-        body: json.encode(
-            {'priceId': priceId, 'userId': userId, 'userEmail': userEmail}),
+        body: json.encode({'priceId': priceId, 'userEmail': userEmail}),
       );
       if (resp.statusCode == 200) {
         final data = json.decode(resp.body);

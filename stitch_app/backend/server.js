@@ -7,10 +7,17 @@ require('dotenv').config({ path: path.resolve(__dirname, '.env') });
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const JWT_SECRET = process.env.JWT_SECRET || 'stitch-app-secret-change-in-production';
+
+// ─── Security: Require JWT_SECRET ────────────────────────────────────────────
+const JWT_SECRET = process.env.JWT_SECRET;
+if (!JWT_SECRET) {
+    console.error('❌ FATAL: JWT_SECRET environment variable is required. Set it in .env');
+    process.exit(1);
+}
 
 // ─── Stripe Setup ────────────────────────────────────────────────────────────
-const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY || 'sk_test_placeholder');
+const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY;
+const stripe = STRIPE_SECRET_KEY ? require('stripe')(STRIPE_SECRET_KEY) : null;
 
 // ─── Firebase Admin Setup ────────────────────────────────────────────────────
 let admin = null;
@@ -41,7 +48,68 @@ try {
 const inMemoryUsers = {};
 const inMemoryTransactions = [];
 const inMemoryGifts = [];
-const processedSessions = new Set();
+const processedSessions = new Map(); // Map<sessionId, timestamp> for TTL cleanup
+
+// Clean up processed sessions older than 24 hours
+setInterval(() => {
+    const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+    for (const [id, ts] of processedSessions) {
+        if (ts < cutoff) processedSessions.delete(id);
+    }
+}, 60 * 60 * 1000); // Run hourly
+
+// ─── Rate Limiting ───────────────────────────────────────────────────────────
+const rateLimitStore = new Map();
+
+function rateLimit(windowMs, maxRequests) {
+    return (req, res, next) => {
+        const key = `${req.ip}:${req.path}`;
+        const now = Date.now();
+        const windowStart = now - windowMs;
+
+        if (!rateLimitStore.has(key)) {
+            rateLimitStore.set(key, []);
+        }
+
+        const requests = rateLimitStore.get(key).filter(ts => ts > windowStart);
+        rateLimitStore.set(key, requests);
+
+        if (requests.length >= maxRequests) {
+            return res.status(429).json({ error: 'Too many requests. Please try again later.' });
+        }
+
+        requests.push(now);
+        next();
+    };
+}
+
+// Clean up rate limit store periodically
+setInterval(() => {
+    const now = Date.now();
+    for (const [key, timestamps] of rateLimitStore) {
+        const fresh = timestamps.filter(ts => ts > now - 15 * 60 * 1000);
+        if (fresh.length === 0) rateLimitStore.delete(key);
+        else rateLimitStore.set(key, fresh);
+    }
+}, 5 * 60 * 1000);
+
+const authRateLimit = rateLimit(15 * 60 * 1000, 15); // 15 attempts per 15 min
+const financialRateLimit = rateLimit(60 * 1000, 10); // 10 per minute
+
+// ─── Input Validation ────────────────────────────────────────────────────────
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+function sanitizeString(str) {
+    if (typeof str !== 'string') return '';
+    return str.replace(/[<>&"']/g, c => ({
+        '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&#39;'
+    })[c]);
+}
+
+function isValidAmount(amount) {
+    const num = parseFloat(amount);
+    return !isNaN(num) && isFinite(num) && num > 0 && num <= 50000;
+}
 
 // ─── Firestore Data Model Initialization ─────────────────────────────────────
 async function initializeFirestore() {
@@ -51,7 +119,6 @@ async function initializeFirestore() {
     }
 
     try {
-        // Check if already initialized
         const metaDoc = await db.collection('_meta').doc('initialized').get();
         if (metaDoc.exists) {
             console.log('✅ Firestore already initialized');
@@ -60,8 +127,6 @@ async function initializeFirestore() {
 
         console.log('🔧 Initializing Firestore data models...');
 
-        // ─── Create Users Collection Schema ──────────────────────────────
-        // Schema: { name, email, password_hash, balance, tier, role, created_at, updated_at }
         const adminPasswordHash = await bcrypt.hash('admin123', 10);
         const demoPasswordHash = await bcrypt.hash('demo123', 10);
 
@@ -96,7 +161,6 @@ async function initializeFirestore() {
 
         for (const user of seedUsers) {
             await db.collection('users').doc(user.id).set(user.data);
-            // Also create a Firebase Auth user
             try {
                 await admin.auth().createUser({
                     uid: user.id,
@@ -112,8 +176,6 @@ async function initializeFirestore() {
         }
         console.log('  ✅ Users collection seeded (2 users)');
 
-        // ─── Create Transactions Collection ──────────────────────────────
-        // Schema: { user_id, amount, type(credit|debit), description, category, created_at }
         const seedTransactions = [
             { user_id: 'demo_user', amount: 500.00, type: 'credit', description: 'Amazon Gift Card Conversion', category: 'gift_card', created_at: new Date(Date.now() - 86400000 * 3).toISOString() },
             { user_id: 'demo_user', amount: 250.00, type: 'credit', description: 'iTunes Gift Card Conversion', category: 'gift_card', created_at: new Date(Date.now() - 86400000 * 2).toISOString() },
@@ -127,8 +189,6 @@ async function initializeFirestore() {
         }
         console.log('  ✅ Transactions collection seeded (5 transactions)');
 
-        // ─── Create Gifts Collection ─────────────────────────────────────
-        // Schema: { sender_id, recipient_email, amount, message, occasion, status(pending|claimed|expired), created_at }
         const seedGifts = [
             { sender_id: 'demo_user', recipient_email: 'sarah@example.com', amount: 100.00, message: 'Happy Birthday!', occasion: 'birthday', status: 'pending', created_at: new Date(Date.now() - 86400000).toISOString() },
         ];
@@ -138,8 +198,6 @@ async function initializeFirestore() {
         }
         console.log('  ✅ Gifts collection seeded (1 gift)');
 
-        // ─── Create Fraud Flags Collection ───────────────────────────────
-        // Schema: { user_id, name, reason, amount, severity(low|medium|high), status(open|reviewed|dismissed), created_at }
         const seedFraudFlags = [
             { user_id: 'flag_1', name: 'Alex Johnson', reason: 'Multiple IP logins', amount: 2450.00, severity: 'high', status: 'open', created_at: new Date().toISOString() },
             { user_id: 'flag_2', name: 'Sarah Williams', reason: 'Bulk gift card claim', amount: 820.00, severity: 'medium', status: 'open', created_at: new Date().toISOString() },
@@ -151,8 +209,6 @@ async function initializeFirestore() {
         }
         console.log('  ✅ Fraud flags collection seeded (3 flags)');
 
-        // ─── Create Settings Collection ──────────────────────────────────
-        // Schema: { key, value, description, updated_at, updated_by }
         const seedSettings = [
             { key: 'global_rate_lock', value: true, description: '2:1 peg to all gates', updated_at: new Date().toISOString(), updated_by: 'system' },
             { key: 'standard_spread', value: 291, description: 'Standard spread in basis points', updated_at: new Date().toISOString(), updated_by: 'system' },
@@ -164,23 +220,14 @@ async function initializeFirestore() {
         }
         console.log('  ✅ Settings collection seeded (3 settings)');
 
-        // ─── Mark as initialized ─────────────────────────────────────────
         await db.collection('_meta').doc('initialized').set({
             initialized_at: new Date().toISOString(),
-            version: '2.0.0',
+            version: '2.1.0',
             collections: ['users', 'transactions', 'gifts', 'fraud_flags', 'settings'],
         });
 
         console.log('✅ Firestore initialization complete!\n');
-        console.log('   📊 Collections created:');
-        console.log('   • users        — User profiles + auth data');
-        console.log('   • transactions  — Wallet transaction history');
-        console.log('   • gifts         — Sent/received gifts');
-        console.log('   • fraud_flags   — Flagged suspicious activity');
-        console.log('   • settings      — App configuration\n');
-        console.log('   👤 Demo Accounts:');
-        console.log('   • admin@unicredit.app / admin123  (Admin)');
-        console.log('   • alex@example.com   / demo123   (User)\n');
+        console.log('   📊 Collections: users, transactions, gifts, fraud_flags, settings\n');
 
     } catch (err) {
         console.error('❌ Firestore initialization error:', err.message);
@@ -188,11 +235,22 @@ async function initializeFirestore() {
 }
 
 // ─── Middleware ───────────────────────────────────────────────────────────────
-app.use(cors({ origin: '*' }));
+const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || 'http://localhost:3000,http://localhost:8080,http://localhost:5000').split(',');
+app.use(cors({
+    origin: (origin, callback) => {
+        // Allow requests with no origin (mobile apps, curl, etc.)
+        if (!origin || ALLOWED_ORIGINS.includes(origin)) {
+            callback(null, true);
+        } else {
+            callback(null, true); // Allow for now in dev — tighten in production
+        }
+    },
+    credentials: true,
+}));
 
 // Raw body for Stripe webhooks
 app.use('/api/stripe/webhook', express.raw({ type: 'application/json' }));
-app.use(express.json());
+app.use(express.json({ limit: '1mb' }));
 
 // Logger
 app.use((req, res, next) => {
@@ -202,11 +260,10 @@ app.use((req, res, next) => {
 
 // ─── JWT Auth Middleware ─────────────────────────────────────────────────────
 function generateToken(userId, role) {
-    return jwt.sign({ userId, role }, JWT_SECRET, { expiresIn: '7d' });
+    return jwt.sign({ userId, role }, JWT_SECRET, { expiresIn: '24h' });
 }
 
 function authMiddleware(req, res, next) {
-    // Public routes that don't need auth (paths are relative to /api mount)
     const publicPaths = [
         '/auth/login',
         '/auth/register',
@@ -235,7 +292,6 @@ function authMiddleware(req, res, next) {
     }
 }
 
-// Apply auth middleware to all /api routes
 app.use('/api', authMiddleware);
 
 // ─── Helper Functions ────────────────────────────────────────────────────────
@@ -281,7 +337,7 @@ async function addTransaction(userId, amount, type, description, category = 'gen
         user_id: userId,
         amount,
         type,
-        description,
+        description: sanitizeString(description),
         category,
         created_at: new Date().toISOString(),
     };
@@ -298,29 +354,31 @@ async function addTransaction(userId, amount, type, description, category = 'gen
 // ─── Auth Routes ─────────────────────────────────────────────────────────────
 
 // POST /api/auth/register
-app.post('/api/auth/register', async (req, res) => {
+app.post('/api/auth/register', authRateLimit, async (req, res) => {
     try {
         const { email, password, name } = req.body;
         if (!email || !password) {
             return res.status(400).json({ error: 'Email and password required' });
         }
-        if (password.length < 6) {
-            return res.status(400).json({ error: 'Password must be at least 6 characters' });
+        if (!EMAIL_REGEX.test(email)) {
+            return res.status(400).json({ error: 'Invalid email format' });
+        }
+        if (password.length < 8) {
+            return res.status(400).json({ error: 'Password must be at least 8 characters' });
         }
 
-        // Check if email already exists
         const existing = await getUserByEmail(email);
         if (existing) {
             return res.status(409).json({ error: 'Email already registered' });
         }
 
-        const passwordHash = await bcrypt.hash(password, 10);
-        const displayName = name || email.split('@')[0];
-        const isAdmin = email.toLowerCase().includes('admin');
+        const passwordHash = await bcrypt.hash(password, 12);
+        const displayName = sanitizeString(name || email.split('@')[0]);
+        // Security: All new users are regular users. Admin role is assigned manually.
+        const role = 'user';
         let userId;
 
         if (firebaseEnabled) {
-            // Create Firebase Auth user
             const authUser = await admin.auth().createUser({
                 email,
                 password,
@@ -328,14 +386,13 @@ app.post('/api/auth/register', async (req, res) => {
             });
             userId = authUser.uid;
 
-            // Create Firestore user doc
             await db.collection('users').doc(userId).set({
                 name: displayName,
                 email,
                 password_hash: passwordHash,
                 balance: 0,
                 tier: 'STANDARD',
-                role: isAdmin ? 'admin' : 'user',
+                role,
                 created_at: new Date().toISOString(),
                 updated_at: new Date().toISOString(),
             });
@@ -348,13 +405,13 @@ app.post('/api/auth/register', async (req, res) => {
                 password_hash: passwordHash,
                 balance: 0,
                 tier: 'STANDARD',
-                role: isAdmin ? 'admin' : 'user',
+                role,
                 created_at: new Date().toISOString(),
                 updated_at: new Date().toISOString(),
             };
         }
 
-        const token = generateToken(userId, isAdmin ? 'admin' : 'user');
+        const token = generateToken(userId, role);
         const user = await getUser(userId);
         const { password_hash, ...safeUser } = user;
 
@@ -366,25 +423,24 @@ app.post('/api/auth/register', async (req, res) => {
         if (err.code === 'auth/email-already-exists') {
             return res.status(409).json({ error: 'Email already registered' });
         }
-        res.status(500).json({ error: err.message });
+        console.error('Register error:', err.message);
+        res.status(500).json({ error: 'Registration failed. Please try again.' });
     }
 });
 
 // POST /api/auth/login
-app.post('/api/auth/login', async (req, res) => {
+app.post('/api/auth/login', authRateLimit, async (req, res) => {
     try {
         const { email, password } = req.body;
         if (!email || !password) {
             return res.status(400).json({ error: 'Email and password required' });
         }
 
-        // Look up user by email
         const user = await getUserByEmail(email);
         if (!user) {
             return res.status(401).json({ error: 'Invalid email or password' });
         }
 
-        // Verify password
         const validPassword = await bcrypt.compare(password, user.password_hash);
         if (!validPassword) {
             return res.status(401).json({ error: 'Invalid email or password' });
@@ -398,11 +454,12 @@ app.post('/api/auth/login', async (req, res) => {
             user: safeUser,
         });
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        console.error('Login error:', err.message);
+        res.status(500).json({ error: 'Login failed. Please try again.' });
     }
 });
 
-// POST /api/auth/me  (validate token + get current user)
+// GET /api/auth/me
 app.get('/api/auth/me', async (req, res) => {
     try {
         const user = await getUser(req.userId);
@@ -410,19 +467,20 @@ app.get('/api/auth/me', async (req, res) => {
         const { password_hash, ...safeUser } = user;
         res.json({ id: req.userId, ...safeUser });
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        console.error('Auth/me error:', err.message);
+        res.status(500).json({ error: 'Failed to fetch user data' });
     }
 });
 
 // POST /api/auth/change-password
-app.post('/api/auth/change-password', async (req, res) => {
+app.post('/api/auth/change-password', authRateLimit, async (req, res) => {
     try {
         const { currentPassword, newPassword } = req.body;
         if (!currentPassword || !newPassword) {
             return res.status(400).json({ error: 'Both current and new password required' });
         }
-        if (newPassword.length < 6) {
-            return res.status(400).json({ error: 'New password must be at least 6 characters' });
+        if (newPassword.length < 8) {
+            return res.status(400).json({ error: 'New password must be at least 8 characters' });
         }
 
         const user = await getUser(req.userId);
@@ -433,14 +491,13 @@ app.post('/api/auth/change-password', async (req, res) => {
             return res.status(401).json({ error: 'Current password is incorrect' });
         }
 
-        const newHash = await bcrypt.hash(newPassword, 10);
+        const newHash = await bcrypt.hash(newPassword, 12);
 
         if (firebaseEnabled) {
             await db.collection('users').doc(req.userId).update({
                 password_hash: newHash,
                 updated_at: new Date().toISOString(),
             });
-            // Also update Firebase Auth password
             await admin.auth().updateUser(req.userId, { password: newPassword });
         } else {
             inMemoryUsers[req.userId].password_hash = newHash;
@@ -448,38 +505,50 @@ app.post('/api/auth/change-password', async (req, res) => {
 
         res.json({ success: true, message: 'Password updated successfully' });
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        console.error('Change password error:', err.message);
+        res.status(500).json({ error: 'Failed to change password. Please try again.' });
     }
 });
 
 // ─── User Routes ─────────────────────────────────────────────────────────────
 
-// GET /api/users/:id
+// GET /api/users/:id — users can only access their own profile
 app.get('/api/users/:id', async (req, res) => {
     try {
+        // IDOR protection: users can only view their own profile, admins can view any
+        if (req.params.id !== req.userId && req.userRole !== 'admin') {
+            return res.status(403).json({ error: 'Access denied' });
+        }
         const user = await getUser(req.params.id);
         if (!user) return res.status(404).json({ error: 'User not found' });
         const { password_hash, ...safeUser } = user;
         res.json(safeUser);
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        console.error('Get user error:', err.message);
+        res.status(500).json({ error: 'Failed to fetch user' });
     }
 });
 
-// POST /api/users  (upsert user — kept for backwards compatibility)
+// POST /api/users — users can only update their own profile
 app.post('/api/users', async (req, res) => {
     try {
         const { uid, name, email } = req.body;
         if (!uid || !email) return res.status(400).json({ error: 'uid and email required' });
 
+        // IDOR protection: users can only update themselves
+        if (uid !== req.userId && req.userRole !== 'admin') {
+            return res.status(403).json({ error: 'Access denied' });
+        }
+
+        const safeName = sanitizeString(name);
+
         if (firebaseEnabled) {
             const existing = await db.collection('users').doc(uid).get();
             if (existing.exists) {
-                // Merge update
-                await db.collection('users').doc(uid).set({ name, email, updated_at: new Date().toISOString() }, { merge: true });
+                await db.collection('users').doc(uid).set({ name: safeName, email, updated_at: new Date().toISOString() }, { merge: true });
             } else {
                 await db.collection('users').doc(uid).set({
-                    name: name || email.split('@')[0],
+                    name: safeName || email.split('@')[0],
                     email,
                     balance: 0,
                     tier: 'STANDARD',
@@ -490,35 +559,43 @@ app.post('/api/users', async (req, res) => {
             }
         } else {
             if (inMemoryUsers[uid]) {
-                inMemoryUsers[uid].name = name || inMemoryUsers[uid].name;
+                inMemoryUsers[uid].name = safeName || inMemoryUsers[uid].name;
                 inMemoryUsers[uid].email = email;
             } else {
-                inMemoryUsers[uid] = { id: uid, name: name || email.split('@')[0], email, balance: 0, tier: 'STANDARD', role: 'user', created_at: new Date().toISOString() };
+                inMemoryUsers[uid] = { id: uid, name: safeName || email.split('@')[0], email, balance: 0, tier: 'STANDARD', role: 'user', created_at: new Date().toISOString() };
             }
         }
         const user = await getUser(uid);
         const { password_hash, ...safeUser } = user || {};
         res.json({ id: uid, ...safeUser });
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        console.error('Upsert user error:', err.message);
+        res.status(500).json({ error: 'Failed to update user' });
     }
 });
 
 // ─── Wallet Routes ───────────────────────────────────────────────────────────
 
-// GET /api/wallet/balance/:userId
+// GET /api/wallet/balance/:userId — IDOR protected
 app.get('/api/wallet/balance/:userId', async (req, res) => {
     try {
+        if (req.params.userId !== req.userId && req.userRole !== 'admin') {
+            return res.status(403).json({ error: 'Access denied' });
+        }
         const user = await getUser(req.params.userId);
         res.json({ balance: user ? user.balance : 0 });
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        console.error('Balance error:', err.message);
+        res.status(500).json({ error: 'Failed to fetch balance' });
     }
 });
 
-// GET /api/transactions/:userId
+// GET /api/transactions/:userId — IDOR protected
 app.get('/api/transactions/:userId', async (req, res) => {
     try {
+        if (req.params.userId !== req.userId && req.userRole !== 'admin') {
+            return res.status(403).json({ error: 'Access denied' });
+        }
         if (firebaseEnabled) {
             const snap = await db.collection('transactions')
                 .where('user_id', '==', req.params.userId)
@@ -530,19 +607,28 @@ app.get('/api/transactions/:userId', async (req, res) => {
         const txs = inMemoryTransactions.filter(t => t.user_id === req.params.userId).slice(0, 20);
         res.json(txs);
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        console.error('Transactions error:', err.message);
+        res.status(500).json({ error: 'Failed to fetch transactions' });
     }
 });
 
 // ─── Convert Gift Card ───────────────────────────────────────────────────────
 
-// POST /api/convert
-app.post('/api/convert', async (req, res) => {
+// POST /api/convert — uses authenticated user, not body userId
+app.post('/api/convert', financialRateLimit, async (req, res) => {
     try {
-        const { userId, merchant, cardNumber, pin, amount } = req.body;
-        if (!userId || !amount) return res.status(400).json({ error: 'userId and amount required' });
+        const { merchant, cardNumber, pin, amount } = req.body;
 
-        // Get exchange rate from settings
+        if (!isValidAmount(amount)) {
+            return res.status(400).json({ error: 'Invalid amount. Must be between $0.01 and $50,000.' });
+        }
+        if (!merchant || !cardNumber) {
+            return res.status(400).json({ error: 'Merchant and card number required' });
+        }
+
+        // Use authenticated user ID, not body userId (IDOR fix)
+        const userId = req.userId;
+
         let exchangeRate = 0.9;
         if (firebaseEnabled) {
             const rateDoc = await db.collection('settings').doc('exchange_rate').get();
@@ -551,34 +637,50 @@ app.post('/api/convert', async (req, res) => {
 
         const addedValue = parseFloat(amount) * exchangeRate;
         const newBalance = await updateUserBalance(userId, addedValue);
-        await addTransaction(userId, addedValue, 'credit', `${merchant || 'Gift Card'} Conversion`, 'gift_card');
+        await addTransaction(userId, addedValue, 'credit', `${sanitizeString(merchant)} Conversion`, 'gift_card');
 
         res.json({ success: true, addedValue: addedValue.toFixed(2), newBalance });
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        console.error('Convert error:', err.message);
+        res.status(500).json({ error: 'Conversion failed. Please try again.' });
     }
 });
 
 // ─── Send Gift ───────────────────────────────────────────────────────────────
 
-// POST /api/gifts/send
-app.post('/api/gifts/send', async (req, res) => {
+// POST /api/gifts/send — uses authenticated user as sender (IDOR fix)
+app.post('/api/gifts/send', financialRateLimit, async (req, res) => {
     try {
-        const { senderId, recipientEmail, amount, message, occasion } = req.body;
-        if (!senderId || !recipientEmail || !amount) return res.status(400).json({ error: 'Missing required fields' });
+        const { recipientEmail, amount, message, occasion } = req.body;
+
+        if (!recipientEmail || !amount) {
+            return res.status(400).json({ error: 'Recipient email and amount required' });
+        }
+        if (!EMAIL_REGEX.test(recipientEmail)) {
+            return res.status(400).json({ error: 'Invalid recipient email' });
+        }
+        if (!isValidAmount(amount)) {
+            return res.status(400).json({ error: 'Invalid amount. Must be between $0.01 and $50,000.' });
+        }
+
+        // Use authenticated user ID as sender (IDOR fix)
+        const senderId = req.userId;
+        const parsedAmount = parseFloat(amount);
 
         const sender = await getUser(senderId);
-        if (!sender || sender.balance < amount) return res.status(400).json({ error: 'Insufficient balance' });
+        if (!sender || sender.balance < parsedAmount) {
+            return res.status(400).json({ error: 'Insufficient balance' });
+        }
 
-        await updateUserBalance(senderId, -parseFloat(amount));
-        await addTransaction(senderId, -parseFloat(amount), 'debit', `Sent Gift to ${recipientEmail}`, 'gift_sent');
+        await updateUserBalance(senderId, -parsedAmount);
+        await addTransaction(senderId, -parsedAmount, 'debit', `Sent Gift to ${sanitizeString(recipientEmail)}`, 'gift_sent');
 
         const gift = {
             sender_id: senderId,
             recipient_email: recipientEmail,
-            amount: parseFloat(amount),
-            message,
-            occasion,
+            amount: parsedAmount,
+            message: sanitizeString(message || ''),
+            occasion: sanitizeString(occasion || ''),
             status: 'pending',
             created_at: new Date().toISOString(),
         };
@@ -594,13 +696,13 @@ app.post('/api/gifts/send', async (req, res) => {
 
         res.json({ success: true, giftId });
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        console.error('Send gift error:', err.message);
+        res.status(500).json({ error: 'Failed to send gift. Please try again.' });
     }
 });
 
 // ─── Admin Routes ────────────────────────────────────────────────────────────
 
-// Admin middleware
 function adminOnly(req, res, next) {
     if (req.userRole !== 'admin') {
         return res.status(403).json({ error: 'Admin access required' });
@@ -608,8 +710,8 @@ function adminOnly(req, res, next) {
     next();
 }
 
-// GET /api/admin/stats
-app.get('/api/admin/stats', async (req, res) => {
+// GET /api/admin/stats — now requires admin role
+app.get('/api/admin/stats', adminOnly, async (req, res) => {
     try {
         let totalUsers = 0;
         let totalTransactions = 0;
@@ -636,27 +738,21 @@ app.get('/api/admin/stats', async (req, res) => {
             totalUsers = Object.keys(inMemoryUsers).length;
             totalTransactions = inMemoryTransactions.length;
             totalVolume = inMemoryTransactions.reduce((sum, t) => t.amount > 0 ? sum + t.amount : sum, 0);
-            fraudFlags = [
-                { id: 1, name: 'Alex Johnson', reason: 'Multiple IP logins', amount: 2450.00, severity: 'high' },
-                { id: 2, name: 'Sarah Williams', reason: 'Bulk gift card claim', amount: 820.00, severity: 'medium' },
-            ];
         }
 
         res.json({
             totalVolume,
-            volumeGrowth: 5.2,
             users: totalUsers,
-            usersGrowth: 12,
             activeConversations: totalTransactions,
-            activeConvGrowth: -2,
             fraudFlags,
         });
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        console.error('Admin stats error:', err.message);
+        res.status(500).json({ error: 'Failed to fetch admin stats' });
     }
 });
 
-// GET /api/admin/users  (list all users)
+// GET /api/admin/users
 app.get('/api/admin/users', adminOnly, async (req, res) => {
     try {
         if (firebaseEnabled) {
@@ -670,7 +766,8 @@ app.get('/api/admin/users', adminOnly, async (req, res) => {
         const users = Object.values(inMemoryUsers).map(({ password_hash, ...u }) => u);
         res.json(users);
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        console.error('Admin users error:', err.message);
+        res.status(500).json({ error: 'Failed to fetch users' });
     }
 });
 
@@ -685,7 +782,8 @@ app.get('/api/admin/fraud-flags', adminOnly, async (req, res) => {
         }
         res.json([]);
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        console.error('Fraud flags error:', err.message);
+        res.status(500).json({ error: 'Failed to fetch fraud flags' });
     }
 });
 
@@ -704,7 +802,8 @@ app.put('/api/admin/settings/:key', adminOnly, async (req, res) => {
         }
         res.json({ success: true, key: req.params.key, value });
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        console.error('Settings error:', err.message);
+        res.status(500).json({ error: 'Failed to update setting' });
     }
 });
 
@@ -713,6 +812,7 @@ app.put('/api/admin/settings/:key', adminOnly, async (req, res) => {
 // GET /api/stripe/prices
 app.get('/api/stripe/prices', async (req, res) => {
     try {
+        if (!stripe) return res.status(503).json({ error: 'Stripe not configured' });
         const prices = await stripe.prices.list({ product: 'prod_U4AuducLkzCtPk', active: true });
         const formatted = prices.data.map(p => ({
             id: p.id,
@@ -722,67 +822,80 @@ app.get('/api/stripe/prices', async (req, res) => {
         })).sort((a, b) => a.amount - b.amount);
         res.json(formatted);
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        console.error('Stripe prices error:', err.message);
+        res.status(500).json({ error: 'Failed to fetch prices' });
     }
 });
 
 // POST /api/stripe/create-checkout-session
-app.post('/api/stripe/create-checkout-session', async (req, res) => {
+app.post('/api/stripe/create-checkout-session', financialRateLimit, async (req, res) => {
     try {
-        const { priceId, userId, userEmail } = req.body;
-        if (!priceId || !userId) return res.status(400).json({ error: 'priceId and userId required' });
+        if (!stripe) return res.status(503).json({ error: 'Stripe not configured' });
+
+        const { priceId, userEmail } = req.body;
+        // Use authenticated userId, not body userId (IDOR fix)
+        const userId = req.userId;
+        if (!priceId) return res.status(400).json({ error: 'priceId required' });
+
+        const BASE_URL = process.env.BASE_URL || `http://localhost:${PORT}`;
 
         const session = await stripe.checkout.sessions.create({
             payment_method_types: ['card'],
             line_items: [{ price: priceId, quantity: 1 }],
             mode: 'payment',
-            success_url: `http://localhost:3000/api/stripe/success?session_id={CHECKOUT_SESSION_ID}&user_id=${userId}`,
-            cancel_url: `http://localhost:3000/api/stripe/cancel`,
+            success_url: `${BASE_URL}/api/stripe/success?session_id={CHECKOUT_SESSION_ID}`,
+            cancel_url: `${BASE_URL}/api/stripe/cancel`,
             customer_email: userEmail || undefined,
             metadata: { userId },
         });
 
         res.json({ url: session.url, sessionId: session.id });
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        console.error('Stripe checkout error:', err.message);
+        res.status(500).json({ error: 'Failed to create checkout session' });
     }
 });
 
-// GET /api/stripe/success (redirect landing — public)
+// GET /api/stripe/success — uses session metadata for userId (tamper-proof)
 app.get('/api/stripe/success', async (req, res) => {
     try {
-        const { session_id, user_id } = req.query;
-        if (!session_id || !user_id) return res.status(400).send('Missing parameters');
+        if (!stripe) return res.status(503).send('Stripe not configured');
+        const { session_id } = req.query;
+        if (!session_id) return res.status(400).send('Missing session ID');
 
         const session = await stripe.checkout.sessions.retrieve(session_id);
-        if (session.payment_status === 'paid') {
+        // Get userId from trusted session metadata, not from query param
+        const userId = session.metadata?.userId;
+
+        if (session.payment_status === 'paid' && userId) {
             const amountPaid = session.amount_total / 100;
             if (!processedSessions.has(session_id)) {
-                processedSessions.add(session_id);
-                await updateUserBalance(user_id, amountPaid);
-                await addTransaction(user_id, amountPaid, 'credit', `Wallet Top-Up via Stripe`, 'top_up');
+                processedSessions.set(session_id, Date.now());
+                await updateUserBalance(userId, amountPaid);
+                await addTransaction(userId, amountPaid, 'credit', 'Wallet Top-Up via Stripe', 'top_up');
             }
             res.send(`<html><body style="font-family:sans-serif;text-align:center;padding:40px">
-        <h1 style="color:#135BEC">✅ Payment Successful!</h1>
-        <p>$${amountPaid.toFixed(2)} has been added to your Stitch wallet.</p>
+        <h1 style="color:#135BEC">Payment Successful!</h1>
+        <p>$${amountPaid.toFixed(2)} has been added to your wallet.</p>
         <p>You may close this tab and return to the app.</p>
       </body></html>`);
         } else {
-            res.send('<html><body><h2>Payment not complete.</h2></body></html>');
+            res.send('<html><body style="font-family:sans-serif;text-align:center;padding:40px"><h2>Payment not complete.</h2></body></html>');
         }
     } catch (err) {
-        res.status(500).send(`Error: ${err.message}`);
+        console.error('Stripe success error:', err.message);
+        res.status(500).send('Payment verification failed. Please contact support.');
     }
 });
 
 app.get('/api/stripe/cancel', (req, res) => {
     res.send(`<html><body style="font-family:sans-serif;text-align:center;padding:40px">
-    <h1>❌ Payment Cancelled</h1>
+    <h1>Payment Cancelled</h1>
     <p>You may close this tab and return to the app.</p>
   </body></html>`);
 });
 
-// POST /api/stripe/webhook (public)
+// POST /api/stripe/webhook
 app.post('/api/stripe/webhook', async (req, res) => {
     const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
     let event;
@@ -792,11 +905,13 @@ app.post('/api/stripe/webhook', async (req, res) => {
             const sig = req.headers['stripe-signature'];
             event = stripe.webhooks.constructEvent(req.body, sig, webhookSecret);
         } else {
+            // In development without webhook secret, still parse but log warning
+            console.warn('⚠️  Webhook signature verification skipped — set STRIPE_WEBHOOK_SECRET for production');
             event = JSON.parse(req.body);
         }
     } catch (err) {
         console.error('Webhook signature verification failed:', err.message);
-        return res.status(400).send(`Webhook Error: ${err.message}`);
+        return res.status(400).json({ error: 'Webhook verification failed' });
     }
 
     if (event.type === 'checkout.session.completed') {
@@ -804,7 +919,7 @@ app.post('/api/stripe/webhook', async (req, res) => {
         const sessionId = session.id;
         if (session.payment_status === 'paid' && session.metadata?.userId) {
             if (!processedSessions.has(sessionId)) {
-                processedSessions.add(sessionId);
+                processedSessions.set(sessionId, Date.now());
                 const userId = session.metadata.userId;
                 const amount = session.amount_total / 100;
                 await updateUserBalance(userId, amount);
@@ -824,7 +939,7 @@ app.get('/health', (req, res) => {
     res.json({
         status: 'ok',
         firebase: firebaseEnabled,
-        stripe: !!process.env.STRIPE_SECRET_KEY,
+        stripe: !!STRIPE_SECRET_KEY,
         timestamp: new Date().toISOString(),
     });
 });
@@ -833,9 +948,8 @@ app.get('/health', (req, res) => {
 app.listen(PORT, async () => {
     console.log(`\n🚀 Stitch Backend running on http://localhost:${PORT}`);
     console.log(`   Firebase: ${firebaseEnabled ? '✅ Connected' : '⚠️  In-Memory mode'}`);
-    console.log(`   Stripe:   ${process.env.STRIPE_SECRET_KEY && process.env.STRIPE_SECRET_KEY !== 'sk_test_REPLACE_WITH_YOUR_TEST_KEY' ? '✅ Connected' : '⚠️  No key set'}`);
-    console.log(`   Auth:     ✅ JWT + bcrypt\n`);
+    console.log(`   Stripe:   ${STRIPE_SECRET_KEY ? '✅ Connected' : '⚠️  No key set'}`);
+    console.log(`   Auth:     ✅ JWT (24h) + bcrypt (12 rounds)\n`);
 
-    // Initialize Firestore data models on first run
     await initializeFirestore();
 });

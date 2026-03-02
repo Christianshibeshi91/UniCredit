@@ -426,7 +426,6 @@ class _PersonalizeYourGiftScreenState extends State<PersonalizeYourGiftScreen> {
           : _selectedOccasion;
 
       final result = await ApiService.sendGift(
-        senderId: appState.userId,
         recipientEmail: recipient,
         amount: amount,
         message: message.isNotEmpty ? message : 'Enjoy your gift!',
@@ -456,9 +455,9 @@ class _PersonalizeYourGiftScreenState extends State<PersonalizeYourGiftScreen> {
     } catch (e) {
       if (!mounted) return;
       scaffold.showSnackBar(
-        SnackBar(
-          content: Text('Error: $e'),
-          backgroundColor: const Color(0xFFDC2626),
+        const SnackBar(
+          content: Text('Something went wrong. Please try again.'),
+          backgroundColor: Color(0xFFDC2626),
         ),
       );
     } finally {
