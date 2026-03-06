@@ -10,7 +10,6 @@ import json
 import os
 import subprocess
 import sys
-import signal
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update  # pyre-ignore[21]
 from telegram.ext import (  # pyre-ignore[21]
@@ -451,8 +450,8 @@ async def logs_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         log_path = os.path.join(BASE_DIR, "daily_run.log")
         if os.path.exists(log_path):
             with open(log_path, "r", encoding="utf-8", errors="replace") as f:
-                lines = f.readlines()[-20:]
-            text = "".join(lines)[:3500]
+                lines = f.readlines()[-20:]  # pyre-ignore[29]
+            text = "".join(lines)[:3500]  # pyre-ignore[29]
             await update.message.reply_text(f"<pre>{text}</pre>", parse_mode="HTML")
         else:
             await update.message.reply_text("No log file found.")
@@ -479,7 +478,7 @@ async def logs_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         await update.message.reply_text(f"No output from '{name}' yet.")
         return
 
-    text = "\n".join(tail)[:3500]
+    text = "\n".join(tail)[:3500]  # pyre-ignore[29]
     await update.message.reply_text(
         f"\U0001f4c3 <b>Logs: {name}</b> (last {len(tail)} lines)\n\n<pre>{text}</pre>",
         parse_mode="HTML",
@@ -500,20 +499,20 @@ async def shell_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     await update.message.reply_text(f"\u23f3 Running: <code>{cmd}</code>", parse_mode="HTML")
 
     try:
-        result = await asyncio.get_event_loop().run_in_executor(
-            None,
-            lambda: subprocess.run(
+        def _run_shell() -> subprocess.CompletedProcess[bytes]:
+            return subprocess.run(
                 cmd, shell=True, cwd=BASE_DIR, capture_output=True, timeout=30,
-            ),
-        )
+            )
+
+        result = await asyncio.get_event_loop().run_in_executor(None, _run_shell)  # pyre-ignore[6]
         output = (result.stdout or b"").decode("utf-8", errors="replace")
         stderr = (result.stderr or b"").decode("utf-8", errors="replace")
 
         text = ""
         if output:
-            text += output[:3000]
+            text += output[:3000]  # pyre-ignore[29]
         if stderr:
-            text += f"\n\nSTDERR:\n{stderr[:500]}"
+            text += f"\n\nSTDERR:\n{stderr[:500]}"  # pyre-ignore[29]
         if not text:
             text = "(no output)"
 
@@ -557,7 +556,7 @@ async def claude_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     await update.message.reply_text(
         f"\U0001f9e0 <b>Claude Code</b>\n\n"
-        f"Prompt: <i>{prompt[:200]}</i>\n\n"
+        f"Prompt: <i>{prompt[:200]}</i>\n\n"  # pyre-ignore[29]
         f"Running... Use /logs claude to check progress.",
         parse_mode="HTML",
     )
@@ -579,11 +578,11 @@ async def claude_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         try:
             while True:
                 line = await asyncio.get_event_loop().run_in_executor(
-                    None, proc.stdout.readline
+                    None, proc.stdout.readline  # pyre-ignore[16]
                 )
                 if not line:
                     break
-                decoded = line.decode("utf-8", errors="replace").rstrip()
+                decoded = line.decode("utf-8", errors="replace").rstrip()  # pyre-ignore[16]
                 if decoded:
                     log_lines.append(decoded)
                     if len(log_lines) > 500:
@@ -618,7 +617,7 @@ async def claude_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                     parse_mode="HTML",
                 )
                 for i in range(0, len(result_text), 3500):
-                    chunk = result_text[i:i + 3500]
+                    chunk = result_text[i:i + 3500]  # pyre-ignore[29]
                     try:
                         await bot.send_message(
                             chat_id=chat_id,
@@ -929,7 +928,7 @@ async def _handle_resume(query, job_id: str, job_data: dict) -> None:
                     pass
 
     if resume_text:
-        preview = resume_text[:3500] if len(resume_text) > 3500 else resume_text
+        preview = resume_text[:3500] if len(resume_text) > 3500 else resume_text  # pyre-ignore[29]
         if len(resume_text) > 3500:
             preview += "..."
         msg = f"\U0001f4c4 <b>Tailored Resume — {title}</b>\n\n<pre>{preview}</pre>"
@@ -1046,6 +1045,74 @@ def send_approval_card(job_data: dict) -> bool:
             except Exception as e:
                 alert("Telegram Error", f"Failed to send to viewer {chat_id}: {e}", "error")
                 success = False
+
+    return success
+
+
+def send_job_notification(job_data: dict) -> bool:
+    """Send a notification-only card (no buttons) to all chat IDs after auto-apply."""
+    if not BOT_TOKEN or (not ADMIN_CHAT_IDS and not VIEWER_CHAT_IDS):
+        alert("Telegram Bot", "BOT_TOKEN or CHAT_IDS not configured", "warning")
+        return False
+
+    import requests  # pyre-ignore[21]
+
+    title = job_data.get("title", "Unknown")
+    company = job_data.get("company", "Unknown")
+    location = job_data.get("location", "")
+    salary = job_data.get("salary", "Not listed")
+    remote = job_data.get("remote_status", "Unknown")
+    url = job_data.get("job_url", "")
+    job_score = job_data.get("score", 0)
+    grade = job_data.get("grade", "N/A")
+    matched = job_data.get("matched_skills", [])
+    app_type = job_data.get("application_type", "")
+    apply_status = job_data.get("apply_status", "applied")  # applied / failed / external
+    resume_link = job_data.get("resume_drive_link", "")
+    cl_link = job_data.get("cover_letter_drive_link", "")
+
+    matched_str = ", ".join(matched[:8]) if matched else "None"
+
+    if apply_status == "applied":
+        header = f"\u2705 <b>Applied \u2014 {title}</b>"
+    elif apply_status == "failed":
+        header = f"\u274c <b>Application Failed \u2014 {title}</b>"
+    else:
+        header = f"\U0001f4cb <b>External \u2014 {title}</b>"
+
+    lines = [
+        header,
+        f"{company} \u2014 {location}",
+        "",
+        f"\U0001f3af Score: {job_score}/100 ({grade})",
+        f"\U0001f4bc Type: {app_type} | Remote: {remote}",
+        f"\U0001f4b0 Salary: {salary}",
+        f"\u2705 Matched: {matched_str}",
+    ]
+    if resume_link:
+        lines.append(f'\U0001f4c4 <a href="{resume_link}">Resume</a>')
+    if cl_link:
+        lines.append(f'\U0001f4dd <a href="{cl_link}">Cover Letter</a>')
+    lines.append(f'\U0001f517 <a href="{url}">View Job</a>')
+
+    message = "\n".join(lines)
+
+    api_url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+    success = True
+    all_ids = list(set(ADMIN_CHAT_IDS + VIEWER_CHAT_IDS))
+
+    for chat_id in all_ids:
+        try:
+            resp = requests.post(api_url, json={
+                "chat_id": chat_id,
+                "text": message,
+                "parse_mode": "HTML",
+                "disable_web_page_preview": True,
+            }, timeout=10)
+            resp.raise_for_status()
+        except Exception as e:
+            alert("Telegram Error", f"Failed to send notification to {chat_id}: {e}", "error")
+            success = False
 
     return success
 

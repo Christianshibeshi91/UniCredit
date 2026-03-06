@@ -2,6 +2,9 @@
 .env
 credentials.json
 token.json
+token.json.bak*
+linkedin_auth.json
+candidate/learned_answers.json
 
 # Temp / scratch
 .tmp/
