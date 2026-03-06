@@ -1,0 +1,21 @@
+[Sat 02/28/2026  1:39:25.76] Starting job discovery run... 
+
+[WAITING] FOR YOUR INPUT -- Application staged for review.
+
+
+============================================================
+  AI Job Discovery System — Daily Run
+  2026-02-28 09:39 UTC
+  Mode: LIVE
+  Max jobs: 2 | Min score: 70
+============================================================
+
+
+  ▶ Searching LinkedIn jobs
+    cmd: C:\Users\chris\AppData\Local\Programs\Python\Python312\python.exe implementation/search_linkedin_jobs.py --output .tmp/raw_jobs.json --date-posted past24Hours
+    ✗ Attempt 1/3 failed (exit 1): no stderr
+    ✗ Attempt 2/3 failed (exit 1): no stderr
+    ✗ Attempt 3/3 failed (exit 1): no stderr
+  ✗ Searching LinkedIn jobs failed after 3 attempts
+FATAL: Job search failed. Check Apify credentials.
+[Sat 02/28/2026  1:40:24.18] Run finished. 

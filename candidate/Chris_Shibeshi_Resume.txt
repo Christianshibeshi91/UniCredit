@@ -1,0 +1,20 @@
+Christian Shibeshi
+Power Platform Consultant | Seattle, WA
+Email: christianshibeshi@outlook.com
+
+Summary:
+Senior Power Platform Consultant with 9 years of enterprise experience designing and delivering mission-critical solutions across banking, financial services, aerospace, and telecommunications. Specializes in Power Apps (Canvas, Model-Driven, Custom Pages), Power Automate, Power BI, Dataverse architecture, D365 CE, and Azure integrations.
+
+Core Skills:
+Power Apps (Canvas, Model-Driven, Custom Pages), Power Automate, Power BI, Dataverse, Dynamics 365 CE, Azure Logic Apps, API Management, Custom Connectors, CI/CD, Azure DevOps, GRC Compliance.
+
+Experience:
+- Royal Bank of Canada / City National Bank (Power Platform Consultant): Owned GRC systems, built Dataverse models, Model-Driven Apps, and CI/CD pipelines.
+- WSECU (Power Platform Developer): Built loan automation and executive dashboards.
+- Boeing (Power Platform Consultant): Engineering workflow automation and Power Pages portals.
+- AT&T (Microsoft 365 / SharePoint Developer): Developed SPFx web parts and led M365 migrations.
+
+Certifications:
+- Power Platform Solution Architect Expert
+- Power Platform Developer Associate
+- Power Platform Functional Consultant Associate

@@ -1,0 +1,131 @@
+{
+  "name": "Christian Shibeshi",
+  "title": "Power Platform Consultant",
+  "location": "Seattle, WA",
+  "remote_ok": true,
+  "salary_target_min": 165000,
+  "salary_target_max": 185000,
+  "email": "christianshibeshi@outlook.com",
+  "target_roles": [
+    "Power Platform Consultant",
+    "Power Platform Architect",
+    "Power Platform Developer",
+    "Microsoft 365 Developer",
+    "D365 CE Developer"
+  ],
+  "years_of_experience": 9,
+  "summary": "Senior Power Platform Consultant with 9 years of enterprise experience designing and delivering mission-critical solutions across banking, financial services, aerospace, and telecommunications. Specializes in Power Apps (Canvas, Model-Driven, Custom Pages), Power Automate, Power BI, Dataverse architecture, D365 CE, and Azure integrations. Deep expertise in GRC-compliant deployments, CI/CD via Azure DevOps, and custom API connectors in regulated enterprise environments.",
+  "core_skills": [
+    "Power Apps (Canvas Apps)",
+    "Power Apps (Model-Driven Apps)",
+    "Power Apps (Custom Pages)",
+    "Power Automate",
+    "Power BI",
+    "DAX",
+    "Power Query",
+    "Dataverse",
+    "Dynamics 365 CE",
+    "SharePoint Online",
+    "Azure Logic Apps",
+    "Azure API Management",
+    "Custom Connectors",
+    "REST APIs",
+    "CI/CD",
+    "Azure DevOps",
+    "Power Pages",
+    "SPFx",
+    "Microsoft 365",
+    "GRC Compliance",
+    "Enterprise Architecture",
+    "Solution Architecture"
+  ],
+  "industries": [
+    "Banking",
+    "Financial Services",
+    "Aerospace",
+    "Telecommunications"
+  ],
+  "experience": [
+    {
+      "company": "Royal Bank of Canada / City National Bank",
+      "title": "Power Platform Consultant",
+      "duration": "2+ years",
+      "highlights": [
+        "Owned and operated GRC (Governance, Risk & Compliance) systems built on Power Platform",
+        "Architected Dataverse-based relational data models for regulated banking workflows",
+        "Built Model-Driven Apps and Canvas Apps for internal compliance and audit tracking",
+        "Implemented Power Automate flows for automated approval chains and audit logging",
+        "Integrated Power Platform with Azure API Management and custom REST connectors",
+        "Maintained CI/CD pipelines via Azure DevOps for deployment to production"
+      ]
+    },
+    {
+      "company": "WSECU (Washington State Employees Credit Union)",
+      "title": "Power Platform Developer",
+      "duration": "2 years",
+      "highlights": [
+        "Built loan automation workflows using Power Automate and Dataverse",
+        "Designed and deployed financial services Canvas Apps for loan officers",
+        "Integrated core banking APIs via custom connectors in Power Platform",
+        "Developed Power BI dashboards for executive loan portfolio reporting",
+        "Implemented automated notification and escalation flows"
+      ]
+    },
+    {
+      "company": "Boeing",
+      "title": "Power Platform Consultant",
+      "duration": "2 years",
+      "highlights": [
+        "Delivered engineering workflow automation solutions using Power Platform",
+        "Built Power Pages portals for external vendor and supplier collaboration",
+        "Architected Model-Driven Apps for engineering change management",
+        "Integrated Power Platform with SharePoint Online and Azure services",
+        "Led CI/CD pipeline setup for Power Platform solution deployment via Azure DevOps"
+      ]
+    },
+    {
+      "company": "AT&T",
+      "title": "Microsoft 365 / SharePoint Developer",
+      "duration": "2 years",
+      "highlights": [
+        "Developed SPFx (SharePoint Framework) web parts and extensions",
+        "Led SharePoint Online migration projects from on-premises environments",
+        "Built service desk automation systems using Power Automate",
+        "Created Power Apps for internal IT service management",
+        "Delivered enterprise intranet solutions on Microsoft 365"
+      ]
+    }
+  ],
+  "certifications": [
+    "Microsoft Certified: Power Platform Solution Architect Expert",
+    "Microsoft Certified: Power Platform Developer Associate",
+    "Microsoft Certified: Power Platform Functional Consultant Associate"
+  ],
+  "education": "Bachelor's Degree",
+  "keywords_for_ats": [
+    "Power Platform",
+    "Power Apps",
+    "Power Automate",
+    "Power BI",
+    "Dataverse",
+    "Dynamics 365",
+    "D365 CE",
+    "Microsoft 365",
+    "SharePoint",
+    "Azure",
+    "Logic Apps",
+    "API Management",
+    "Custom Connectors",
+    "CI/CD",
+    "Azure DevOps",
+    "GRC",
+    "Low-code",
+    "No-code",
+    "Canvas Apps",
+    "Model-Driven Apps",
+    "Power Pages",
+    "Solution Architecture",
+    "Enterprise Architecture",
+    "Digital Transformation"
+  ]
+}
