@@ -32,6 +32,7 @@ from LinkedinAutomation.generate_cover_letter import generate  # pyre-ignore[21]
 from LinkedinAutomation.find_connections import find  # pyre-ignore[21]
 from LinkedinAutomation.log_to_sheets import log_job  # pyre-ignore[21]
 from LinkedinAutomation.apply_easy_apply import apply as easy_apply  # pyre-ignore[21]
+from LinkedinAutomation.apply_external_form import apply_external  # pyre-ignore[21]
 from LinkedinAutomation.mark_job_seen import mark_seen  # pyre-ignore[21]
 from LinkedinAutomation.telegram_bot import send_job_notification  # pyre-ignore[21]
 from LinkedinAutomation.log_to_sheets import update_job_status  # pyre-ignore[21]
@@ -231,6 +232,23 @@ def main():
                     apply_status = "failed"
                     applied_str = "No"
                     alert("Apply Error", f"Easy Apply failed for {title}: {e}", "warning")
+            else:
+                # External application — auto-fill ATS forms
+                alert("External Apply", f"Attempting external application for {title}...")
+                try:
+                    result = apply_external(job, resume_pdf)
+                    if result:
+                        apply_status = "applied"
+                        applied_str = "Yes"
+                        alert("Applied", f"External application submitted for {title} at {company}")
+                    else:
+                        apply_status = "failed"
+                        applied_str = "No"
+                        alert("External Failed", f"External apply returned False for {title}", "warning")
+                except Exception as e:
+                    apply_status = "failed"
+                    applied_str = "No"
+                    alert("External Error", f"External apply failed for {title}: {e}", "warning")
 
             # 3i: Log to Google Sheets
             alert("Logging", "Writing to Google Sheets...")

@@ -30,6 +30,7 @@ load_dotenv(os.path.join(BASE_DIR, ".env"))
 
 from LinkedinAutomation.alert_user import alert  # pyre-ignore[21]
 from LinkedinAutomation.apply_easy_apply import apply as easy_apply, apply_async  # pyre-ignore[21]
+from LinkedinAutomation.apply_external_form import apply_external_async  # pyre-ignore[21]
 from LinkedinAutomation.log_to_sheets import log_job, update_job_status  # pyre-ignore[21]
 
 PENDING_PATH = os.path.join(BASE_DIR, ".tmp", "pending_approval.json")
@@ -726,12 +727,13 @@ async def _handle_approve(query, job_id: str, job_data: dict) -> None:
         parse_mode="HTML",
     )
 
-    applied = "No, Manually Apply"
-    if job_data.get("application_type") == "Easy Apply":
-        resume_file = job_data.get("resume_file", "")
-        cl_text = job_data.get("cover_letter_text", "")
-        try:
-            ask_cb = _create_ask_admin_callback()
+    applied = "No"
+    ask_cb = _create_ask_admin_callback()
+
+    try:
+        if job_data.get("application_type") == "Easy Apply":
+            resume_file = job_data.get("resume_file", "")
+            cl_text = job_data.get("cover_letter_text", "")
             result = await apply_async(
                 {"job_url": job_data.get("job_url"), "job_id": job_id,
                  "title": title, "company": company, "is_easy_apply": True},
@@ -739,10 +741,20 @@ async def _handle_approve(query, job_id: str, job_data: dict) -> None:
             )
             if result:
                 applied = "Yes"
-        except Exception as e:
-            alert("Easy Apply Error", str(e), "error")
-        finally:
-            _pending_question = None
+        else:
+            # External application — auto-fill ATS form
+            resume_file = job_data.get("resume_file", "")
+            result = await apply_external_async(
+                {"job_url": job_data.get("job_url"), "job_id": job_id,
+                 "title": title, "company": company},
+                resume_file, ask_callback=ask_cb,
+            )
+            if result:
+                applied = "Yes"
+    except Exception as e:
+        alert("Apply Error", str(e), "error")
+    finally:
+        _pending_question = None
 
     # Update Google Sheet
     sheet_row = job_data.get("sheet_row")
