@@ -25,14 +25,17 @@ with open(PROFILE_PATH, "r") as f:
     profile = json.load(f)
 
 # Realistic test job
+import time as _time
+_test_id = f"test-e2e-{int(_time.time())}"
+
 test_job = {
-    "job_id": "test-e2e-001",
+    "job_id": _test_id,
     "title": "Senior Power Platform Engineer",
     "company": "Microsoft",
     "location": "Redmond, WA (Hybrid)",
     "remote_status": "Hybrid",
     "salary": "$160,000 - $190,000",
-    "job_url": "https://www.linkedin.com/jobs/view/test-e2e-001",
+    "job_url": f"https://www.linkedin.com/jobs/view/{_test_id}",
     "is_easy_apply": True,
     "description": """We are looking for a Senior Power Platform Engineer to join our Business Applications team.
 

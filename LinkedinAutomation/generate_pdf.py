@@ -127,7 +127,8 @@ def _parse_resume_text(text: str) -> ResumeData:
                 summary += (" " + stripped) if summary else stripped  # pyre-ignore[58]
         elif current_section == "skills":
             if stripped:
-                skills += (" " + stripped) if skills else stripped  # pyre-ignore[58]
+                # Use double-space separator to preserve category lines
+                skills += ("  " + stripped) if skills else stripped  # pyre-ignore[58]
         elif current_section == "experience":
             if not stripped:
                 continue
@@ -211,20 +212,47 @@ def generate_resume_pdf(text: str, output_path: str) -> str:
     # === Core Competencies ===
     if data["skills"]:
         pdf._section_header("Core Competencies")
-        # Split skills into columns
-        skill_list = [s.strip() for s in data["skills"].split(",") if s.strip()]
-        col_width = (pdf.w - 40) / 3
-        pdf.set_font("Helvetica", size=9)
         pdf.set_text_color(*DARK_GRAY)
 
-        for i, skill in enumerate(skill_list):
-            col = i % 3
-            if col == 0 and i > 0:
-                pdf.ln(5)
-            x = 20 + col * col_width
-            pdf.set_x(x)
-            pdf.cell(col_width, 5, skill.strip())
-        pdf.ln(5)
+        # Check if skills use "Category: items" format
+        skill_lines = [s.strip() for s in data["skills"].split("  ") if s.strip()]
+        has_categories = any(":" in line for line in skill_lines)
+
+        if has_categories:
+            # Two-column table: bold category label | items
+            label_col_w = 42  # fixed width for category labels
+            items_col_w = pdf.w - 40 - label_col_w  # remaining width
+
+            for line in skill_lines:
+                if ":" in line:
+                    cat, items = line.split(":", 1)
+                    y_before = pdf.get_y()
+                    # Category label (bold, left column)
+                    pdf.set_font("Helvetica", "B", 9)
+                    pdf.set_x(20)
+                    pdf.cell(label_col_w, 5, cat.strip())
+                    # Items (regular, right column with wrapping)
+                    pdf.set_font("Helvetica", size=9)
+                    pdf.set_x(20 + label_col_w)
+                    pdf.multi_cell(items_col_w, 5, items.strip(), align="L")
+                    pdf.ln(1)
+                else:
+                    pdf.set_font("Helvetica", size=9)
+                    pdf.multi_cell(0, 5, line, align="L")
+                    pdf.ln(1)
+        else:
+            # Flat comma-separated list in 3 columns
+            skill_list = [s.strip() for s in data["skills"].split(",") if s.strip()]
+            col_width = (pdf.w - 40) / 3
+            pdf.set_font("Helvetica", size=9)
+            for i, skill in enumerate(skill_list):
+                col = i % 3
+                if col == 0 and i > 0:
+                    pdf.ln(5)
+                x = 20 + col * col_width
+                pdf.set_x(x)
+                pdf.cell(col_width, 5, skill.strip())
+        pdf.ln(3)
 
     # === Professional Experience ===
     if data["experience"]:
@@ -246,9 +274,13 @@ def generate_resume_pdf(text: str, output_path: str) -> str:
             pdf.set_font("Helvetica", size=9.5)
             pdf.set_text_color(*DARK_GRAY)
             for bullet in exp["bullets"]:
+                # Strip leading "- " to avoid double bullet (· -)
+                b_text = bullet.strip()
+                if b_text.startswith("- "):
+                    b_text = b_text[2:]  # pyre-ignore[29]
                 pdf.set_x(25)
                 pdf.cell(4, 5, chr(183))  # bullet character
-                pdf.multi_cell(0, 5, " " + bullet.strip())
+                pdf.multi_cell(0, 5, " " + b_text)
 
             pdf.ln(2)
 
@@ -258,9 +290,12 @@ def generate_resume_pdf(text: str, output_path: str) -> str:
         pdf.set_font("Helvetica", size=9.5)
         pdf.set_text_color(*DARK_GRAY)
         for cert in data["certifications"]:
+            c_text = cert.strip()
+            if c_text.startswith("- "):
+                c_text = c_text[2:]  # pyre-ignore[29]
             pdf.set_x(25)
             pdf.cell(4, 5, chr(183))
-            pdf.cell(0, 5, " " + cert.strip(), new_x="LMARGIN", new_y="NEXT")
+            pdf.cell(0, 5, " " + c_text, new_x="LMARGIN", new_y="NEXT")
 
     # === Education ===
     if data["education"]:

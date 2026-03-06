@@ -778,7 +778,7 @@ async def _handle_skip(query, job_id: str, job_data: dict) -> None:
     sheet_ok = False
     if sheet_row:
         try:
-            update_job_status(sheet_row, "Rejected", "No, Rejected")
+            update_job_status(sheet_row, "Rejected", "No")
             sheet_ok = True
         except Exception as e:
             alert("Sheet Update Error", str(e), "warning")

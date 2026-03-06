@@ -32,10 +32,9 @@ from LinkedinAutomation.generate_cover_letter import generate  # pyre-ignore[21]
 from LinkedinAutomation.find_connections import find  # pyre-ignore[21]
 from LinkedinAutomation.log_to_sheets import log_job  # pyre-ignore[21]
 from LinkedinAutomation.apply_easy_apply import apply as easy_apply  # pyre-ignore[21]
-from LinkedinAutomation.apply_external import extract_url  # pyre-ignore[21]
 from LinkedinAutomation.mark_job_seen import mark_seen  # pyre-ignore[21]
-from LinkedinAutomation.send_job_email import send_job_notification  # pyre-ignore[21]
-from LinkedinAutomation.telegram_bot import send_approval_card  # pyre-ignore[21]
+from LinkedinAutomation.telegram_bot import send_job_notification  # pyre-ignore[21]
+from LinkedinAutomation.log_to_sheets import update_job_status  # pyre-ignore[21]
 from LinkedinAutomation.generate_daily_report import send_daily_report  # pyre-ignore[21]
 from LinkedinAutomation.follow_up_tracker import check_follow_ups  # pyre-ignore[21]
 from LinkedinAutomation.interview_prep import check_interview_statuses  # pyre-ignore[21]
@@ -211,9 +210,31 @@ def main():
                 resume_drive_link = fut_rdrive.result()
                 cl_drive_link = fut_cdrive.result()
 
-            # 3h: Log to Google Sheets with Pending Approval status
-            alert("Logging", "Writing to Google Sheets...")
+            # 3h: Auto-apply for Easy Apply jobs
             app_type = "Easy Apply" if job.get("is_easy_apply") else "External"
+            apply_status = "external"
+            applied_str = "No"
+
+            if job.get("is_easy_apply"):
+                alert("Auto Apply", f"Attempting Easy Apply for {title}...")
+                try:
+                    result = easy_apply(job, resume_pdf, cl_text)
+                    if result:
+                        apply_status = "applied"
+                        applied_str = "Yes"
+                        alert("Applied", f"Successfully applied to {title} at {company}")
+                    else:
+                        apply_status = "failed"
+                        applied_str = "No"
+                        alert("Apply Failed", f"Easy Apply returned False for {title}", "warning")
+                except Exception as e:
+                    apply_status = "failed"
+                    applied_str = "No"
+                    alert("Apply Error", f"Easy Apply failed for {title}: {e}", "warning")
+
+            # 3i: Log to Google Sheets
+            alert("Logging", "Writing to Google Sheets...")
+            status_map = {"applied": "Applied", "failed": "Application Failed", "external": "Ready to Apply"}
             log_data = {
                 "title": title,
                 "company": company,
@@ -235,8 +256,8 @@ def main():
                 "resume_drive_link": resume_drive_link,
                 "cover_letter_drive_link": cl_drive_link,
                 "application_type": app_type,
-                "application_status": "Pending Approval",
-                "applied": "No, Pending Approval",
+                "application_status": status_map[apply_status],
+                "applied": applied_str,
             }
             sheet_row = -1
             try:
@@ -244,9 +265,9 @@ def main():
             except Exception as e:
                 alert("Sheets Error", str(e), "warning")
 
-            # 3i: Send Telegram approval card (with inline approve/skip buttons)
-            alert("Telegram", f"Sending approval card for {title}...")
-            approval_data = {
+            # 3j: Send Telegram notification (no buttons, just info)
+            alert("Telegram", f"Sending notification for {title}...")
+            notification_data = {
                 "job_id": job_id,
                 "title": title,
                 "company": company,
@@ -254,34 +275,20 @@ def main():
                 "remote_status": job.get("remote_status", ""),
                 "salary": job.get("salary", ""),
                 "job_url": job.get("job_url", ""),
-                "description": job.get("description", ""),
                 "score": job_score,
                 "grade": grade,
                 "matched_skills": score_result.get("matched_skills", []),
-                "missing_skills": score_result.get("missing_skills", []),
                 "application_type": app_type,
-                "connections_summary": conn.get("connection_name", ""),
-                "best_contact": conn.get("connection_title", ""),
-                "outreach_message": conn.get("outreach_message", ""),
-                "resume_file": resume_file,
-                "cover_letter_text": cl_text,
+                "apply_status": apply_status,
                 "resume_drive_link": resume_drive_link,
                 "cover_letter_drive_link": cl_drive_link,
-                "leadership_opportunity_level": score_result.get("leadership_opportunity_level", ""),
-                "enterprise_relevance_score": score_result.get("enterprise_relevance_score", ""),
-                "sheet_row": sheet_row,
             }
             try:
-                send_approval_card(approval_data)
+                send_job_notification(notification_data)
             except Exception as e:
-                alert("Telegram Error", f"Could not send approval card: {e}", "warning")
-                # Fallback: send simple notification
-                try:
-                    send_job_notification(job, score_result)
-                except Exception:
-                    pass
+                alert("Telegram Error", f"Could not send notification: {e}", "warning")
 
-            # 3j: Mark as seen
+            # 3k: Mark as seen
             mark_seen(job["job_url"])
             processed += 1
             jobs_processed_list.append(job_id)  # pyre-ignore[29]

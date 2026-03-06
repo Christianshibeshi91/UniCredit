@@ -1,0 +1,18 @@
+[Unit]
+Description=AI Job Discovery Bot (Scheduler + Telegram)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=chris
+WorkingDirectory=/home/chris/Anti-gravity
+ExecStart=/home/chris/Anti-gravity/venv/bin/python run_service.py
+Restart=always
+RestartSec=30
+StandardOutput=append:/home/chris/Anti-gravity/.tmp/service.log
+StandardError=append:/home/chris/Anti-gravity/.tmp/service.log
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target

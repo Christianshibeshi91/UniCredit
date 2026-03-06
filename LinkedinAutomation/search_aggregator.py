@@ -16,7 +16,7 @@ BASE_DIR = os.path.dirname(os.path.dirname(__file__))
 load_dotenv(os.path.join(BASE_DIR, ".env"))
 
 # Platforms to search (configurable via .env)
-DEFAULT_PLATFORMS = "linkedin,indeed,glassdoor"
+DEFAULT_PLATFORMS = "linkedin,indeed,glassdoor,dice,ziprecruiter,simplyhired,monster,builtin"
 
 
 def _normalize_text(text: str) -> str:
@@ -58,7 +58,11 @@ def _cross_platform_dedup(jobs: list) -> list:
 
     Prefers LinkedIn > Indeed > Glassdoor when duplicates found.
     """
-    priority = {"linkedin": 0, "indeed": 1, "glassdoor": 2}
+    priority = {
+        "linkedin": 0, "indeed": 1, "glassdoor": 2,
+        "dice": 3, "ziprecruiter": 4, "builtin": 5,
+        "simplyhired": 6, "monster": 7,
+    }
     # Sort by priority (LinkedIn first)
     jobs.sort(key=lambda j: priority.get(j.get("source", ""), 9))
 
@@ -121,6 +125,19 @@ def aggregate_jobs(max_jobs: int = 15) -> list:
             alert("Aggregator", f"Glassdoor: {len(glassdoor_jobs)} jobs")
         except Exception as e:
             alert("Aggregator", f"Glassdoor search failed: {e}", "error")
+
+    # Firecrawl-powered platforms (Dice, ZipRecruiter, SimplyHired, Monster, Built In)
+    firecrawl_platforms = ["dice", "ziprecruiter", "simplyhired", "monster", "builtin"]
+    for plat in firecrawl_platforms:
+        if plat in platforms:
+            alert("Aggregator", f"Searching {plat.title()}...")
+            try:
+                from LinkedinAutomation.search_firecrawl_jobs import search as firecrawl_search  # pyre-ignore[21]
+                plat_jobs = firecrawl_search(platform=plat, max_jobs=jobs_per_platform)
+                all_jobs.extend(plat_jobs)
+                alert("Aggregator", f"{plat.title()}: {len(plat_jobs)} jobs")
+            except Exception as e:
+                alert("Aggregator", f"{plat.title()} search failed: {e}", "error")
 
     alert("Aggregator", f"Total before dedup: {len(all_jobs)}")
 
