@@ -16,14 +16,16 @@ PT = ZoneInfo("America/Los_Angeles")
 
 
 def _parse_date_logged(date_str: str) -> datetime | None:
-    """Parse Date Logged in either new DD/MM/YYYY format or old ISO format."""
+    """Parse Date Logged — supports MM/DD/YY, DD/MM/YYYY, and ISO formats."""
     if not date_str:
         return None
-    try:
-        clean = date_str.replace(" PT", "").strip()
-        return datetime.strptime(clean, "%d/%m/%Y %I:%M %p").replace(tzinfo=PT)
-    except ValueError:
-        pass
+    clean = date_str.replace(" PST", "").replace(" PT", "").strip()
+    # New format: MM/DD/YY HH:MM AM/PM
+    for fmt in ["%m/%d/%y %I:%M %p", "%d/%m/%Y %I:%M %p"]:
+        try:
+            return datetime.strptime(clean, fmt).replace(tzinfo=PT)
+        except ValueError:
+            continue
     try:
         return datetime.fromisoformat(date_str)
     except (ValueError, TypeError):
@@ -184,7 +186,7 @@ def _build_trend(current: int, previous: int) -> str:
 
 def _build_report_message(stats: dict, prev_stats: dict) -> str:
     """Build the daily report HTML message."""
-    today = datetime.now(PT).strftime("%d/%m/%Y %I:%M %p PT")
+    today = datetime.now(PT).strftime("%m/%d/%y %I:%M %p PST")
 
     jobs_trend = _build_trend(stats["jobs_found"], prev_stats.get("jobs_found", 0))
     applied_trend = _build_trend(stats["applied_count"], prev_stats.get("applied_count", 0))
@@ -252,7 +254,7 @@ def send_daily_report() -> bool:
         message = _build_report_message(stats, prev_stats)
 
         # Save current stats for tomorrow's comparison
-        today_key = datetime.now(PT).strftime("%d/%m/%Y")
+        today_key = datetime.now(PT).strftime("%m/%d/%y")
         history["last_stats"] = stats
         history["last_stats"].pop("top_matches", None)  # Don't persist row dicts
         history["last_report_date"] = today_key

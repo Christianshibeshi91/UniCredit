@@ -17,15 +17,16 @@ PT = ZoneInfo("America/Los_Angeles")
 
 
 def _parse_date_logged(date_str: str) -> datetime | None:
-    """Parse Date Logged in either new DD/MM/YYYY format or old ISO format."""
+    """Parse Date Logged — supports MM/DD/YY, DD/MM/YYYY, and ISO formats."""
     if not date_str:
         return None
-    # Try new format: "05/03/2026 02:30 PM PT"
-    try:
-        clean = date_str.replace(" PT", "").strip()
-        return datetime.strptime(clean, "%d/%m/%Y %I:%M %p").replace(tzinfo=PT)
-    except ValueError:
-        pass
+    clean = date_str.replace(" PST", "").replace(" PT", "").strip()
+    # Try formats: new MM/DD/YY then old DD/MM/YYYY
+    for fmt in ["%m/%d/%y %I:%M %p", "%d/%m/%Y %I:%M %p"]:
+        try:
+            return datetime.strptime(clean, fmt).replace(tzinfo=PT)
+        except ValueError:
+            continue
     # Fallback: ISO format from old rows
     try:
         return datetime.fromisoformat(date_str)
@@ -129,7 +130,7 @@ def _build_reminder_message(row: dict) -> str:
 
 def _update_follow_up_status(service, spreadsheet_id: str, row_num: int) -> None:
     """Set Follow-Up Status (column W) to 'Reminded' and Follow-Up Date (V) to now."""
-    now = datetime.now(PT).strftime("%d/%m/%Y %I:%M %p PT")
+    now = datetime.now(PT).strftime("%m/%d/%y %I:%M %p PST")
     service.spreadsheets().values().batchUpdate(
         spreadsheetId=spreadsheet_id,
         body={
