@@ -151,13 +151,13 @@ def main():
 
     alert("Service", "AI Job Bot service starting (scheduler + Telegram bot)")
 
-    # Start Telegram bot in a daemon thread
-    bot_thread = threading.Thread(target=bot_loop, name="telegram-bot", daemon=True)
-    bot_thread.start()
+    # Start scheduler in a daemon thread
+    sched_thread = threading.Thread(target=scheduler_loop, name="scheduler", daemon=True)
+    sched_thread.start()
 
-    # Run scheduler in main thread (blocking)
+    # Run Telegram bot in main thread (needs main thread for signal handling)
     try:
-        scheduler_loop()
+        bot_loop()
     except KeyboardInterrupt:
         log.info("Keyboard interrupt received")
     finally:
