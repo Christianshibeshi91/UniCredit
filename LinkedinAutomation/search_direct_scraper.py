@@ -483,76 +483,292 @@ def _scrape_indeed(context, max_jobs: int = 10) -> list:
 
 
 # ============================================================
-# 2. Glassdoor — Stealth Playwright
+# 2. Glassdoor + BuiltIn via Google Custom Search API
+#    (100 free queries/day — works perfectly from datacenter IPs)
 # ============================================================
 
-def _scrape_glassdoor(context, max_jobs: int = 10) -> list:
+# Set GOOGLE_CSE_API_KEY and GOOGLE_CSE_CX in .env
+# Create at: https://programmablesearchengine.google.com/
+# Get API key at: https://console.cloud.google.com/apis/credentials
+
+def _search_google_cse(query: str, site: str, max_results: int = 10) -> list:
+    """Search via Google Custom Search Engine JSON API.
+
+    Returns list of {title, url, snippet} dicts.
+    Free tier: 100 queries/day — more than enough for job search.
+    """
+    api_key = os.getenv("GOOGLE_CSE_API_KEY", "")
+    cx = os.getenv("GOOGLE_CSE_CX", "")
+
+    if not api_key or not cx:
+        return []
+
+    results = []
+    try:
+        resp = req_lib.get(
+            "https://www.googleapis.com/customsearch/v1",
+            params={
+                "key": api_key,
+                "cx": cx,
+                "q": f"site:{site} {query}",
+                "num": min(max_results, 10),
+                "dateRestrict": "w1",  # past week
+            },
+            timeout=15,
+        )
+        if resp.status_code == 429:
+            alert("Scraper", "Google CSE: daily quota exceeded", "warning")
+            return []
+        if resp.status_code != 200:
+            alert("Scraper", f"Google CSE: {resp.status_code}", "warning")
+            return []
+
+        data = resp.json()
+        for item in data.get("items", []):
+            results.append({
+                "title": item.get("title", ""),
+                "url": item.get("link", ""),
+                "snippet": item.get("snippet", ""),
+                "page_map": item.get("pagemap", {}),
+            })
+
+    except Exception as e:
+        alert("Scraper", f"Google CSE error: {e}", "error")
+
+    return results
+
+
+def _jsearch_site(site_filter: str, max_jobs: int = 10) -> list:
+    """Search via JSearch RapidAPI — aggregates Indeed, Glassdoor, LinkedIn, etc.
+
+    Free tier: 500 requests/month. Set JSEARCH_API_KEY in .env.
+    Get free key at: https://rapidapi.com/letscrape-6bRBa3QguO5/api/jsearch
+    """
+    api_key = os.getenv("JSEARCH_API_KEY", "")
+    if not api_key:
+        return []
+
+    jobs = []
+    session = req_lib.Session()
+    session.headers.update({
+        "X-RapidAPI-Key": api_key,
+        "X-RapidAPI-Host": "jsearch.p.rapidapi.com",
+    })
+
+    for term in SEARCH_TERMS:
+        if len(jobs) >= max_jobs:
+            break
+
+        alert("Scraper", f"JSearch ({site_filter}): '{term}'")
+        try:
+            resp = session.get(
+                "https://jsearch.p.rapidapi.com/search",
+                params={
+                    "query": f"{term} in USA",
+                    "page": "1",
+                    "num_pages": "1",
+                    "date_posted": "week",
+                    "remote_jobs_only": "true",
+                },
+                timeout=15,
+            )
+            if resp.status_code == 429:
+                alert("Scraper", "JSearch: rate limited", "warning")
+                break
+            if resp.status_code != 200:
+                continue
+
+            data = resp.json()
+            for item in data.get("data", []):
+                if len(jobs) >= max_jobs:
+                    break
+
+                # Filter to specific site if requested
+                employer_url = (item.get("job_apply_link", "") +
+                                item.get("job_google_link", "")).lower()
+                if site_filter and site_filter not in employer_url:
+                    # Also check job_publisher
+                    publisher = item.get("job_publisher", "").lower()
+                    if site_filter.split(".")[0] not in publisher:
+                        continue
+
+                source = site_filter.split(".")[0] if site_filter else "jsearch"
+                title = item.get("job_title", "")
+                company = item.get("employer_name", "")
+                location = item.get("job_city", "")
+                if item.get("job_state"):
+                    location = f"{location}, {item['job_state']}" if location else item["job_state"]
+                if item.get("job_is_remote"):
+                    location = location + " (Remote)" if location else "Remote"
+                description = item.get("job_description", "")[:5000]
+                job_url = item.get("job_apply_link", "") or item.get("job_google_link", "")
+                salary = ""
+                sal_min = item.get("job_min_salary")
+                sal_max = item.get("job_max_salary")
+                if sal_min and sal_max:
+                    salary = f"${int(sal_min):,} - ${int(sal_max):,}/yr"
+
+                job = _make_job(source, title, company, location, job_url, description, salary)
+                if passes_filter(job):
+                    jobs.append(job)
+
+            _polite_delay(0.5, 1)
+
+        except Exception as e:
+            alert("Scraper", f"JSearch error: {e}", "error")
+
+    return jobs
+
+
+def _scrape_glassdoor(max_jobs: int = 10) -> list:
+    """Search Glassdoor via Google CSE + Glassdoor GraphQL API.
+
+    Strategy:
+      1. Google CSE with site:glassdoor.com (works from any IP)
+      2. Glassdoor GraphQL API (may work intermittently)
+      3. Extract structured data from Google's cached snippets
+    """
     if _check_backoff("glassdoor.com"):
         return []
 
     jobs = []
-    page = context.new_page()
-    _load_cookies(context, "glassdoor.com")
 
-    try:
-        for term in SEARCH_TERMS:
+    # --- Method 1: Google CSE (most reliable from datacenter) ---
+    for term in SEARCH_TERMS:
+        if len(jobs) >= max_jobs:
+            break
+
+        alert("Scraper", f"Glassdoor (via Google CSE): '{term}'")
+        results = _search_google_cse(f'"{term}" remote jobs', "glassdoor.com/Job", max_jobs)
+
+        for result in results:
             if len(jobs) >= max_jobs:
                 break
 
-            url = f"https://www.glassdoor.com/Job/jobs.htm?sc.keyword={quote_plus(term)}&locT=N&locId=11047&fromAge=7&remoteWorkType=1"
-            alert("Scraper", f"Glassdoor: '{term}'")
+            title = result["title"]
+            url = result["url"]
+            snippet = result["snippet"]
 
-            page.goto(url, wait_until="domcontentloaded", timeout=25000)
-            _polite_delay(2, 3)
+            # Clean title: remove " - Glassdoor" suffix
+            title_clean = re.split(r'\s*[-|]\s*(?:Glassdoor)', title)[0].strip()
 
-            if _is_captcha(page):
-                alert("Scraper", "Glassdoor: CAPTCHA detected, skipping", "warning")
-                _set_backoff("glassdoor.com")
-                break
+            # Extract company from title pattern "Job Title - Company"
+            company = ""
+            parts = title_clean.rsplit(" - ", 1)
+            if len(parts) == 2:
+                title_clean, company = parts[0].strip(), parts[1].strip()
 
-            _human_scroll(page, 3)
+            # Try to get location from snippet
+            location = ""
+            loc_match = re.search(r'(?:in|location:?)\s+([A-Z][a-zA-Z\s,]+(?:,\s*[A-Z]{2}))', snippet, re.I)
+            if loc_match:
+                location = loc_match.group(1).strip()
+            elif "remote" in snippet.lower():
+                location = "Remote"
 
-            cards = page.query_selector_all("li[data-test='jobListing'], li.JobsList_jobListItem__wjTHv, div[class*='JobCard']")
-            alert("Scraper", f"Glassdoor: {len(cards)} cards found")
+            # Extract salary from page_map or snippet
+            salary = extract_salary(snippet)
+            metatags = result.get("page_map", {}).get("metatags", [{}])
+            if metatags and isinstance(metatags, list):
+                meta = metatags[0] if metatags else {}
+                if not salary:
+                    salary = extract_salary(meta.get("og:description", ""))
 
-            for card in cards:
-                if len(jobs) >= max_jobs:
-                    break
-                try:
-                    title_el = card.query_selector("a[data-test='job-link'], a.JobCard_jobTitle__GLyJ1, a.jobTitle")
-                    company_el = card.query_selector("span.EmployerProfile_compactEmployerName__9MGcV, span.EmployerProfile_employerName__Xemli, div.employerName")
-                    location_el = card.query_selector("div.JobCard_location__Ds1fM, span.loc, div[data-test='emp-location']")
-                    salary_el = card.query_selector("div.JobCard_salaryEstimate__QpbTW, span.css-18034rf")
+            job = _make_job("glassdoor", title_clean, company, location, url, snippet, salary)
+            if passes_filter(job):
+                jobs.append(job)
 
-                    title_text = title_el.inner_text().strip() if title_el else ""
-                    company_text = company_el.inner_text().strip() if company_el else ""
-                    loc_text = location_el.inner_text().strip() if location_el else ""
-                    sal_text = salary_el.inner_text().strip() if salary_el else ""
+    # --- Method 2: JSearch API (aggregates Glassdoor data, free 500/month) ---
+    if len(jobs) < max_jobs:
+        jsearch_jobs = _jsearch_site("glassdoor.com", max_jobs - len(jobs))
+        jobs.extend(jsearch_jobs)
 
-                    href = title_el.get_attribute("href") if title_el else ""
-                    if not href:
-                        continue
-                    job_url = href if href.startswith("http") else f"https://www.glassdoor.com{href}"
+    # --- Method 3: Glassdoor GraphQL (direct API, may be blocked) ---
+    if len(jobs) < max_jobs:
+        gql_jobs = _glassdoor_graphql(max_jobs - len(jobs))
+        jobs.extend(gql_jobs)
 
-                    full_desc = _scrape_detail(context, job_url)
-
-                    job = _make_job("glassdoor", title_text, company_text, loc_text, job_url, full_desc or title_text, sal_text)
-                    if passes_filter(job):
-                        jobs.append(job)
-
-                except Exception:
-                    continue
-
-            _polite_delay(2, 4)
-
-        _save_cookies(context, "glassdoor.com")
-
-    except Exception as e:
-        alert("Scraper", f"Glassdoor error: {e}", "error")
-    finally:
-        page.close()
+    if not jobs:
+        alert("Scraper", "Glassdoor: no results. Set GOOGLE_CSE_API_KEY+GOOGLE_CSE_CX or JSEARCH_API_KEY for best results", "warning")
 
     alert("Scraper", f"Glassdoor: {len(jobs)} jobs")
+    return jobs
+
+
+def _glassdoor_graphql(max_jobs: int) -> list:
+    """Try Glassdoor's internal GraphQL endpoint."""
+    jobs = []
+    session = req_lib.Session()
+    session.headers.update({
+        "User-Agent": get_random_ua(),
+        "Content-Type": "application/json",
+        "gd-csrf-token": "undefined",
+        "apollographql-client-name": "job-search-next",
+        "apollographql-client-version": "8.31.2",
+        "Referer": "https://www.glassdoor.com/Job/jobs.htm",
+        "Origin": "https://www.glassdoor.com",
+    })
+
+    query = """query JobSearchQuery($keyword: String!, $numPerPage: Int, $fromAge: Int) {
+      jobListings(contextHolder: {searchParams: {
+        keyword: $keyword, locationId: 11047, locationType: "N",
+        numPerPage: $numPerPage, fromAge: $fromAge,
+        filterParams: [{filterKey: "remoteWorkType", values: "1"}]
+      }}) {
+        jobListings { jobview {
+          job { jobTitleText descriptionFragment listingId jobLink }
+          header { employerNameFromSearch locationName payPercentile90 payPercentile10 payPeriod }
+        }}
+      }
+    }"""
+
+    for term in SEARCH_TERMS:
+        if len(jobs) >= max_jobs:
+            break
+
+        try:
+            resp = session.post("https://www.glassdoor.com/graph", json=[{
+                "operationName": "JobSearchQuery",
+                "variables": {"keyword": term, "numPerPage": max_jobs, "fromAge": 7},
+                "query": query,
+            }], timeout=15)
+
+            if resp.status_code != 200:
+                continue
+
+            data = resp.json()
+            result = data[0] if isinstance(data, list) else data
+            listings = result.get("data", {}).get("jobListings", {}).get("jobListings", [])
+
+            for listing in listings:
+                if len(jobs) >= max_jobs:
+                    break
+                jv = listing.get("jobview", {})
+                j, h = jv.get("job", {}), jv.get("header", {})
+                title = j.get("jobTitleText", "")
+                company = h.get("employerNameFromSearch", "")
+                location = h.get("locationName", "")
+                desc = j.get("descriptionFragment", "")
+                lid = j.get("listingId", "")
+                link = j.get("jobLink", "") or (f"https://www.glassdoor.com/job-listing/j?jl={lid}" if lid else "")
+                if link and not link.startswith("http"):
+                    link = f"https://www.glassdoor.com{link}"
+
+                salary = ""
+                p10, p90 = h.get("payPercentile10"), h.get("payPercentile90")
+                if p10 and p90:
+                    period = h.get("payPeriod", "ANNUAL")
+                    salary = f"${int(p10):,} - ${int(p90):,}{'/yr' if period == 'ANNUAL' else '/hr'}"
+
+                job = _make_job("glassdoor", title, company, location, link, desc, salary)
+                if passes_filter(job):
+                    jobs.append(job)
+
+            _polite_delay(1, 1.5)
+
+        except Exception:
+            continue
+
     return jobs
 
 
@@ -679,66 +895,71 @@ def _scrape_remoteok(max_jobs: int = 10) -> list:
 
 
 # ============================================================
-# 5. BuiltIn — Stealth Playwright
+# 5. BuiltIn — Google CSE (bypasses Cloudflare completely)
 # ============================================================
 
-def _scrape_builtin(context, max_jobs: int = 10) -> list:
+def _scrape_builtin(max_jobs: int = 10) -> list:
+    """Search BuiltIn via Google CSE — bypasses Cloudflare protection."""
     if _check_backoff("builtin.com"):
         return []
 
     jobs = []
-    page = context.new_page()
 
-    try:
-        for term in SEARCH_TERMS:
+    for term in SEARCH_TERMS:
+        if len(jobs) >= max_jobs:
+            break
+
+        alert("Scraper", f"BuiltIn (via Google CSE): '{term}'")
+        results = _search_google_cse(f'"{term}" remote', "builtin.com/job", max_jobs)
+
+        for result in results:
             if len(jobs) >= max_jobs:
                 break
 
-            url = f"https://builtin.com/jobs/remote?search={quote_plus(term)}&daysSinceUpdated=7"
-            alert("Scraper", f"BuiltIn: '{term}'")
+            title = result["title"]
+            url = result["url"]
+            snippet = result["snippet"]
 
-            page.goto(url, wait_until="domcontentloaded", timeout=20000)
-            _polite_delay(2, 2)
+            # Clean title: remove " | Built In" suffix
+            title_clean = re.split(r'\s*[|]\s*(?:Built\s*In)', title)[0].strip()
 
-            if _is_captcha(page):
-                _set_backoff("builtin.com")
-                break
+            # Extract company from title pattern "Title at Company"
+            company = ""
+            at_match = re.search(r'\bat\s+(.+?)(?:\s*[-|]|$)', title_clean)
+            if at_match:
+                company = at_match.group(1).strip()
+                title_clean = title_clean[:at_match.start()].strip()
 
-            _human_scroll(page, 3)
+            # Extract location from snippet
+            location = "Remote"
+            loc_match = re.search(r'(?:Location|Based in)[:\s]+([^.]+)', snippet, re.I)
+            if loc_match:
+                location = loc_match.group(1).strip()
 
-            cards = page.query_selector_all("div[data-id], div[class*='JobCard'], div.job-card, article")
-            for card in cards:
-                if len(jobs) >= max_jobs:
-                    break
-                try:
-                    title_el = card.query_selector("h2 a, h3 a, a[class*='job-title'], a[class*='JobTitle']")
-                    company_el = card.query_selector("span[class*='company'], a[class*='company'], div[class*='company']")
-                    location_el = card.query_selector("span[class*='location'], div[class*='location']")
+            salary = extract_salary(snippet)
 
-                    title_text = title_el.inner_text().strip() if title_el else ""
-                    company_text = company_el.inner_text().strip() if company_el else ""
-                    loc_text = location_el.inner_text().strip() if location_el else ""
+            # Try to extract richer data from pagemap
+            page_map = result.get("page_map", {})
+            metatags = page_map.get("metatags", [{}])
+            if metatags and isinstance(metatags, list):
+                meta = metatags[0] if metatags else {}
+                og_desc = meta.get("og:description", "")
+                if og_desc and len(og_desc) > len(snippet):
+                    snippet = og_desc
+                if not salary:
+                    salary = extract_salary(og_desc)
 
-                    href = title_el.get_attribute("href") if title_el else ""
-                    if not href or not title_text:
-                        continue
-                    job_url = href if href.startswith("http") else f"https://builtin.com{href}"
+            job = _make_job("builtin", title_clean, company, location, url, snippet, salary)
+            if passes_filter(job):
+                jobs.append(job)
 
-                    full_desc = _scrape_detail(context, job_url)
+    # Fallback: JSearch API if Google CSE didn't find anything
+    if len(jobs) < max_jobs:
+        jsearch_jobs = _jsearch_site("builtin.com", max_jobs - len(jobs))
+        jobs.extend(jsearch_jobs)
 
-                    job = _make_job("builtin", title_text, company_text, loc_text or "Remote", job_url, full_desc or title_text)
-                    if passes_filter(job):
-                        jobs.append(job)
-
-                except Exception:
-                    continue
-
-            _polite_delay(2, 3)
-
-    except Exception as e:
-        alert("Scraper", f"BuiltIn error: {e}", "error")
-    finally:
-        page.close()
+    if not jobs:
+        alert("Scraper", "BuiltIn: no results. Set GOOGLE_CSE_API_KEY+GOOGLE_CSE_CX or JSEARCH_API_KEY for best results", "warning")
 
     alert("Scraper", f"BuiltIn: {len(jobs)} jobs")
     return jobs
@@ -1042,7 +1263,13 @@ def search(max_jobs: int = 15) -> list:
     all_jobs = []
 
     # --- Phase 1: API-based (fast, no browser overhead) ---
-    for name, fn in [("Dice", _scrape_dice), ("RemoteOK", _scrape_remoteok)]:
+    api_scrapers = [
+        ("Dice", _scrape_dice),
+        ("RemoteOK", _scrape_remoteok),
+        ("Glassdoor", _scrape_glassdoor),
+        ("BuiltIn", _scrape_builtin),
+    ]
+    for name, fn in api_scrapers:
         try:
             all_jobs.extend(fn(max_jobs=per_source))
         except Exception as e:
@@ -1062,9 +1289,7 @@ def search(max_jobs: int = 15) -> list:
             try:
                 browser_scrapers = [
                     ("Indeed", _scrape_indeed),
-                    ("Glassdoor", _scrape_glassdoor),
                     ("Google Jobs", _scrape_google_jobs),
-                    ("BuiltIn", _scrape_builtin),
                     ("SimplyHired", _scrape_simplyhired),
                     ("ZipRecruiter", _scrape_ziprecruiter),
                     ("Monster", _scrape_monster),
