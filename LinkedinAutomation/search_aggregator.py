@@ -62,7 +62,8 @@ def _cross_platform_dedup(jobs: list) -> list:
     priority = {
         "linkedin": 0, "indeed": 1, "glassdoor": 2,
         "dice": 3, "ziprecruiter": 4, "builtin": 5,
-        "simplyhired": 6, "monster": 7,
+        "simplyhired": 6, "monster": 7, "google": 8,
+        "remoteok": 9,
     }
     # Sort by priority (LinkedIn first)
     jobs.sort(key=lambda j: priority.get(j.get("source", ""), 9))
@@ -110,18 +111,39 @@ def aggregate_jobs(max_jobs: int = 15) -> list:
         from LinkedinAutomation.search_firecrawl_jobs import search as firecrawl_search  # pyre-ignore[21]
         return (plat.title(), firecrawl_search(platform=plat, max_jobs=jobs_per_platform))
 
+    def _search_custom_scraper():
+        from LinkedinAutomation.search_direct_scraper import search as scraper_search  # pyre-ignore[21]
+        return ("CustomScraper", scraper_search(max_jobs=jobs_per_platform))
+
     # Build list of search tasks
     search_fns = []
     if "linkedin" in platforms:
         search_fns.append(_search_linkedin)
-    if "indeed" in platforms:
-        search_fns.append(_search_indeed)
-    if "glassdoor" in platforms:
-        search_fns.append(_search_glassdoor)
-    firecrawl_platforms = ["dice", "ziprecruiter", "simplyhired", "monster", "builtin"]
-    for plat in firecrawl_platforms:
-        if plat in platforms:
-            search_fns.append(lambda p=plat: _search_firecrawl(p))
+
+    # Use custom scraper as primary (free, stealth) — Firecrawl as fallback
+    use_firecrawl = os.getenv("FIRECRAWL_API_KEY", "")
+    scraper_mode = os.getenv("SCRAPER_MODE", "custom").lower()  # "custom", "firecrawl", "both"
+
+    if scraper_mode == "firecrawl" and use_firecrawl:
+        # Legacy mode: use Firecrawl for everything
+        if "indeed" in platforms:
+            search_fns.append(_search_indeed)
+        if "glassdoor" in platforms:
+            search_fns.append(_search_glassdoor)
+        firecrawl_platforms = ["dice", "ziprecruiter", "simplyhired", "monster", "builtin"]
+        for plat in firecrawl_platforms:
+            if plat in platforms:
+                search_fns.append(lambda p=plat: _search_firecrawl(p))
+    elif scraper_mode == "both" and use_firecrawl:
+        # Belt + suspenders: run both
+        search_fns.append(_search_custom_scraper)
+        if "indeed" in platforms:
+            search_fns.append(_search_indeed)
+        if "glassdoor" in platforms:
+            search_fns.append(_search_glassdoor)
+    else:
+        # Default: custom stealth scraper (no API costs)
+        search_fns.append(_search_custom_scraper)
 
     alert("Aggregator", f"Launching {len(search_fns)} platform searches in parallel...")
     with ThreadPoolExecutor(max_workers=min(len(search_fns), 4)) as pool:
