@@ -29,6 +29,7 @@ import schedule  # pyre-ignore[21]
 
 from LinkedinAutomation.alert_user import alert  # pyre-ignore[21]
 from LinkedinAutomation.anti_detect import get_human_delay  # pyre-ignore[21]
+from LinkedinAutomation.generate_daily_report import send_daily_report  # pyre-ignore[21]
 
 RUN_STATE_PATH = os.path.join(BASE_DIR, ".tmp", "run_state.json")
 LOG_PATH = os.path.join(BASE_DIR, ".tmp", "service.log")
@@ -102,6 +103,15 @@ def run_cycle():
         log.error(f"Cycle failed: {e}", exc_info=True)
 
 
+def _send_report():
+    """Send the 12-hour activity report to Telegram."""
+    try:
+        log.info("Sending scheduled activity report...")
+        send_daily_report()
+    except Exception as e:
+        log.error(f"Report failed: {e}", exc_info=True)
+
+
 def scheduler_loop():
     """Run the job scheduler loop (blocking)."""
     log.info("Scheduler thread started")
@@ -110,7 +120,11 @@ def scheduler_loop():
     run_cycle()
 
     schedule.every(CYCLE_MINUTES).minutes.do(run_cycle)
-    log.info(f"Next cycle in {CYCLE_MINUTES} minutes...")
+
+    # Send activity report every 12 hours (8 AM and 8 PM PT)
+    schedule.every().day.at("08:00").do(_send_report)
+    schedule.every().day.at("20:00").do(_send_report)
+    log.info(f"Next cycle in {CYCLE_MINUTES} minutes, reports at 8AM & 8PM PT")
 
     while not _shutdown.is_set():
         schedule.run_pending()
