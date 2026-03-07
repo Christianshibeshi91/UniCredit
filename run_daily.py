@@ -6,7 +6,7 @@ Usage:
 """
 
 import argparse
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor
 import json
 import os
 import random
@@ -22,7 +22,6 @@ load_dotenv(os.path.join(BASE_DIR, ".env"))
 sys.path.insert(0, BASE_DIR)
 
 from LinkedinAutomation.alert_user import alert  # pyre-ignore[21]
-from LinkedinAutomation.search_linkedin_jobs import search  # pyre-ignore[21]
 from LinkedinAutomation.search_aggregator import aggregate_jobs  # pyre-ignore[21]
 from LinkedinAutomation.deduplicate_jobs import deduplicate  # pyre-ignore[21]
 from LinkedinAutomation.extract_job_intelligence import extract  # pyre-ignore[21]
@@ -30,12 +29,11 @@ from LinkedinAutomation.score_job import score  # pyre-ignore[21]
 from LinkedinAutomation.tailor_resume import tailor  # pyre-ignore[21]
 from LinkedinAutomation.generate_cover_letter import generate  # pyre-ignore[21]
 from LinkedinAutomation.find_connections import find  # pyre-ignore[21]
-from LinkedinAutomation.log_to_sheets import log_job  # pyre-ignore[21]
+from LinkedinAutomation.log_to_sheets import log_job, update_job_status  # pyre-ignore[21]
 from LinkedinAutomation.apply_easy_apply import apply as easy_apply  # pyre-ignore[21]
 from LinkedinAutomation.apply_external_form import apply_external  # pyre-ignore[21]
 from LinkedinAutomation.mark_job_seen import mark_seen  # pyre-ignore[21]
 from LinkedinAutomation.telegram_bot import send_job_notification  # pyre-ignore[21]
-from LinkedinAutomation.log_to_sheets import update_job_status  # pyre-ignore[21]
 from LinkedinAutomation.generate_daily_report import send_daily_report  # pyre-ignore[21]
 from LinkedinAutomation.follow_up_tracker import check_follow_ups  # pyre-ignore[21]
 from LinkedinAutomation.interview_prep import check_interview_statuses  # pyre-ignore[21]
@@ -180,10 +178,11 @@ def main():
                 except Exception:
                     conn = {"connection_name": "Manual Lookup Required", "manual_search_url": ""}
 
-            # 3e: Generate PDFs IN PARALLEL
-            alert("PDF", "Generating professional PDFs...")
+            # 3e: Generate PDFs and upload to Drive IN PARALLEL
+            alert("PDF+Upload", "Generating PDFs and uploading to Drive...")
             resume_pdf_path = os.path.join(BASE_DIR, ".tmp", f"resume_{job_id}.pdf")
             cl_pdf_path = os.path.join(BASE_DIR, ".tmp", f"cl_{job_id}.pdf")
+            safe_name = f"{company}_{title}".replace(" ", "_")
 
             with ThreadPoolExecutor(max_workers=2) as pool:
                 fut_rpdf = pool.submit(generate_resume_pdf, resume_text, resume_pdf_path)  # pyre-ignore[29]
@@ -201,15 +200,19 @@ def main():
                     alert("PDF", f"Cover letter PDF failed ({e}), using txt", "warning")
                     cl_pdf = cl_file
 
-            # 3g: Upload PDFs to Google Drive IN PARALLEL
-            alert("Upload", "Uploading PDFs to Drive...")
-            safe_name = f"{company}_{title}".replace(" ", "_")
-
+            resume_drive_link = ""
+            cl_drive_link = ""
             with ThreadPoolExecutor(max_workers=2) as pool:
                 fut_rdrive = pool.submit(drive_upload, resume_pdf, f"Resume_{safe_name}.pdf")
                 fut_cdrive = pool.submit(drive_upload, cl_pdf, f"CoverLetter_{safe_name}.pdf")
-                resume_drive_link = fut_rdrive.result()
-                cl_drive_link = fut_cdrive.result()
+                try:
+                    resume_drive_link = fut_rdrive.result()
+                except Exception as e:
+                    alert("Drive", f"Resume upload failed: {e}", "warning")
+                try:
+                    cl_drive_link = fut_cdrive.result()
+                except Exception as e:
+                    alert("Drive", f"Cover letter upload failed: {e}", "warning")
 
             # 3h: Auto-apply for Easy Apply jobs
             app_type = "Easy Apply" if job.get("is_easy_apply") else "External"
@@ -250,10 +253,10 @@ def main():
                     applied_str = "No"
                     alert("External Error", f"External apply failed for {title}: {e}", "warning")
 
-            # 3i: Log to Google Sheets
-            alert("Logging", "Writing to Google Sheets...")
+            # 3i: Build job data for logging and notification
             status_map = {"applied": "Applied", "failed": "Application Failed", "external": "Ready to Apply"}
             log_data = {
+                "job_id": job_id,
                 "title": title,
                 "company": company,
                 "location": job.get("location", ""),
@@ -275,34 +278,21 @@ def main():
                 "cover_letter_drive_link": cl_drive_link,
                 "application_type": app_type,
                 "application_status": status_map[apply_status],
+                "apply_status": apply_status,
                 "applied": applied_str,
             }
-            sheet_row = -1
+
+            # Log to Google Sheets
+            alert("Logging", "Writing to Google Sheets...")
             try:
-                sheet_row = log_job(log_data)
+                log_job(log_data)
             except Exception as e:
                 alert("Sheets Error", str(e), "warning")
 
             # 3j: Send Telegram notification (no buttons, just info)
             alert("Telegram", f"Sending notification for {title}...")
-            notification_data = {
-                "job_id": job_id,
-                "title": title,
-                "company": company,
-                "location": job.get("location", ""),
-                "remote_status": job.get("remote_status", ""),
-                "salary": job.get("salary", ""),
-                "job_url": job.get("job_url", ""),
-                "score": job_score,
-                "grade": grade,
-                "matched_skills": score_result.get("matched_skills", []),
-                "application_type": app_type,
-                "apply_status": apply_status,
-                "resume_drive_link": resume_drive_link,
-                "cover_letter_drive_link": cl_drive_link,
-            }
             try:
-                send_job_notification(notification_data)
+                send_job_notification(log_data)
             except Exception as e:
                 alert("Telegram Error", f"Could not send notification: {e}", "warning")
 

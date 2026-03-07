@@ -6,10 +6,12 @@ sends approval cards and handles callback responses.
 """
 
 import asyncio
+import html as html_lib
 import json
 import os
 import subprocess
 import sys
+import threading
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update  # pyre-ignore[21]
 from telegram.ext import (  # pyre-ignore[21]
@@ -60,7 +62,15 @@ _pending_question: dict | None = None
 _bot_application: Application | None = None
 
 
+def _esc(text: str) -> str:
+    """Escape text for Telegram HTML to prevent injection from scraped data."""
+    return html_lib.escape(str(text)) if text else ""
+
+
 # ── Pending jobs file helpers ────────────────────────────────────────
+
+_pending_lock = threading.Lock()
+
 
 def load_pending() -> dict:
     """Load pending approval jobs. Keys are job_id strings."""
@@ -81,43 +91,45 @@ def save_pending(data: dict) -> None:
 
 def add_pending_job(job_data: dict) -> None:
     """Add a job to the pending approval queue (called by run_daily.py)."""
-    pending = load_pending()
-    job_id = job_data.get("job_id", "unknown")
-    pending[job_id] = job_data
-    save_pending(pending)
+    with _pending_lock:
+        pending = load_pending()
+        job_id = job_data.get("job_id", "unknown")
+        pending[job_id] = job_data
+        save_pending(pending)
 
 
 def remove_pending_job(job_id: str) -> dict | None:
     """Remove and return a job from the pending queue."""
-    pending = load_pending()
-    job = pending.pop(job_id, None)
-    save_pending(pending)
-    return job
+    with _pending_lock:
+        pending = load_pending()
+        job = pending.pop(job_id, None)
+        save_pending(pending)
+        return job
 
 
 # ── Telegram message builders ───────────────────────────────────────
 
 def _build_approval_message(job_data: dict) -> str:
     """Build the rich HTML message for a job approval card."""
-    title = job_data.get("title", "Unknown")
-    company = job_data.get("company", "Unknown")
-    location = job_data.get("location", "")
-    salary = job_data.get("salary", "Not listed")
-    remote = job_data.get("remote_status", "Unknown")
-    url = job_data.get("job_url", "")
+    title = _esc(job_data.get("title", "Unknown"))
+    company = _esc(job_data.get("company", "Unknown"))
+    location = _esc(job_data.get("location", ""))
+    salary = _esc(job_data.get("salary", "Not listed"))
+    remote = _esc(job_data.get("remote_status", "Unknown"))
+    url = _esc(job_data.get("job_url", ""))
     score = job_data.get("score", 0)
-    grade = job_data.get("grade", "N/A")
+    grade = _esc(job_data.get("grade", "N/A"))
     matched = job_data.get("matched_skills", [])
     missing = job_data.get("missing_skills", [])
-    app_type = job_data.get("application_type", "Unknown")
-    outreach = job_data.get("outreach_message", "")
-    best_contact = job_data.get("best_contact", "")
-    connections_summary = job_data.get("connections_summary", "")
+    app_type = _esc(job_data.get("application_type", "Unknown"))
+    outreach = _esc(job_data.get("outreach_message", ""))
+    best_contact = _esc(job_data.get("best_contact", ""))
+    connections_summary = _esc(job_data.get("connections_summary", ""))
 
-    grade_emoji = {"A": "\u2b50", "B": "\U0001f7e2", "C": "\U0001f7e1", "D": "\U0001f7e0"}.get(grade, "\U0001f534")
+    grade_emoji = {"A": "\u2b50", "B": "\U0001f7e2", "C": "\U0001f7e1", "D": "\U0001f7e0"}.get(job_data.get("grade", ""), "\U0001f534")
 
-    matched_str = ", ".join(matched[:8]) if matched else "None"
-    missing_str = ", ".join(missing[:5]) if missing else "None"
+    matched_str = ", ".join(_esc(s) for s in matched[:8]) if matched else "None"
+    missing_str = ", ".join(_esc(s) for s in missing[:5]) if missing else "None"
 
     msg = (
         f"{grade_emoji} <b>New Job — Approve or Skip?</b>\n"
@@ -134,7 +146,7 @@ def _build_approval_message(job_data: dict) -> str:
         f"\u274c <b>Missing:</b> {missing_str}\n"
     )
 
-    if connections_summary and connections_summary != "Manual Lookup Required":
+    if connections_summary and connections_summary != _esc("Manual Lookup Required"):
         msg += f"\n\U0001f465 <b>Connection:</b> {connections_summary}"
         if best_contact:
             msg += f" ({best_contact})"
@@ -807,29 +819,29 @@ async def _handle_skip(query, job_id: str, job_data: dict) -> None:
 
 async def _handle_details(query, job_id: str, job_data: dict) -> None:
     """Show comprehensive job details."""
-    title = job_data.get("title", "Unknown")
-    company = job_data.get("company", "Unknown")
-    location = job_data.get("location", "")
-    salary = job_data.get("salary", "Not listed")
-    remote = job_data.get("remote_status", "Unknown")
-    url = job_data.get("job_url", "")
+    title = _esc(job_data.get("title", "Unknown"))
+    company = _esc(job_data.get("company", "Unknown"))
+    location = _esc(job_data.get("location", ""))
+    salary = _esc(job_data.get("salary", "Not listed"))
+    remote = _esc(job_data.get("remote_status", "Unknown"))
+    url = _esc(job_data.get("job_url", ""))
     score_val = job_data.get("score", 0)
-    grade = job_data.get("grade", "N/A")
+    grade = _esc(job_data.get("grade", "N/A"))
     matched = job_data.get("matched_skills", [])
     missing = job_data.get("missing_skills", [])
-    app_type = job_data.get("application_type", "Unknown")
-    desc = job_data.get("description", "No description available.")
-    connections = job_data.get("connections_summary", "")
-    best_contact = job_data.get("best_contact", "")
-    leadership = job_data.get("leadership_opportunity_level", "")
-    enterprise = job_data.get("enterprise_relevance_score", "")
-    resume_drive = job_data.get("resume_drive_link", "")
-    cl_drive = job_data.get("cover_letter_drive_link", "")
+    app_type = _esc(job_data.get("application_type", "Unknown"))
+    desc = _esc(job_data.get("description", "No description available."))
+    connections = _esc(job_data.get("connections_summary", ""))
+    best_contact = _esc(job_data.get("best_contact", ""))
+    leadership = _esc(job_data.get("leadership_opportunity_level", ""))
+    enterprise = _esc(job_data.get("enterprise_relevance_score", ""))
+    resume_drive = _esc(job_data.get("resume_drive_link", ""))
+    cl_drive = _esc(job_data.get("cover_letter_drive_link", ""))
     sheet_row = job_data.get("sheet_row", "")
 
-    grade_emoji = {"A": "\u2b50", "B": "\U0001f7e2", "C": "\U0001f7e1", "D": "\U0001f7e0"}.get(grade, "\U0001f534")
-    matched_str = ", ".join(matched) if matched else "None"
-    missing_str = ", ".join(missing) if missing else "None"
+    grade_emoji = {"A": "\u2b50", "B": "\U0001f7e2", "C": "\U0001f7e1", "D": "\U0001f7e0"}.get(job_data.get("grade", ""), "\U0001f534")
+    matched_str = ", ".join(_esc(s) for s in matched) if matched else "None"
+    missing_str = ", ".join(_esc(s) for s in missing) if missing else "None"
 
     msg = (
         f"\U0001f4cb <b>FULL DETAILS</b>\n"
@@ -924,16 +936,21 @@ async def _handle_resume(query, job_id: str, job_data: dict) -> None:
 
     # Try to read the resume text from disk
     resume_text = ""
+    tmp_dir = os.path.normpath(os.path.join(BASE_DIR, ".tmp"))
     if resume_file:
         txt_path = resume_file
         if not os.path.isabs(txt_path):
-            txt_path = os.path.join(BASE_DIR, ".tmp", resume_file)
+            txt_path = os.path.join(tmp_dir, resume_file)
         # Try .txt version
         txt_fallback = txt_path.replace(".pdf", ".txt")
         for path in [txt_fallback, txt_path]:
-            if os.path.exists(path) and path.endswith(".txt"):
+            resolved = os.path.normpath(path)
+            # Prevent path traversal outside .tmp/
+            if not resolved.startswith(tmp_dir):
+                continue
+            if os.path.exists(resolved) and resolved.endswith(".txt"):
                 try:
-                    with open(path, "r", encoding="utf-8") as f:
+                    with open(resolved, "r", encoding="utf-8") as f:
                         resume_text = f.read()
                     break
                 except Exception:
@@ -970,20 +987,20 @@ async def _handle_back(query, job_id: str, job_data: dict) -> None:
 
 def _build_viewer_message(job_data: dict) -> str:
     """Build a notification-only message (no approve/skip) for viewers."""
-    title = job_data.get("title", "Unknown")
-    company = job_data.get("company", "Unknown")
-    location = job_data.get("location", "")
-    salary = job_data.get("salary", "Not listed")
-    remote = job_data.get("remote_status", "Unknown")
-    url = job_data.get("job_url", "")
+    title = _esc(job_data.get("title", "Unknown"))
+    company = _esc(job_data.get("company", "Unknown"))
+    location = _esc(job_data.get("location", ""))
+    salary = _esc(job_data.get("salary", "Not listed"))
+    remote = _esc(job_data.get("remote_status", "Unknown"))
+    url = _esc(job_data.get("job_url", ""))
     score = job_data.get("score", 0)
-    grade = job_data.get("grade", "N/A")
+    grade = _esc(job_data.get("grade", "N/A"))
     matched = job_data.get("matched_skills", [])
     missing = job_data.get("missing_skills", [])
 
-    grade_emoji = {"A": "\u2b50", "B": "\U0001f7e2", "C": "\U0001f7e1", "D": "\U0001f7e0"}.get(grade, "\U0001f534")
-    matched_str = ", ".join(matched[:8]) if matched else "None"
-    missing_str = ", ".join(missing[:5]) if missing else "None"
+    grade_emoji = {"A": "\u2b50", "B": "\U0001f7e2", "C": "\U0001f7e1", "D": "\U0001f7e0"}.get(job_data.get("grade", ""), "\U0001f534")
+    matched_str = ", ".join(_esc(s) for s in matched[:8]) if matched else "None"
+    missing_str = ", ".join(_esc(s) for s in missing[:5]) if missing else "None"
 
     return (
         f"{grade_emoji} <b>New Job Match</b>\n"
@@ -1069,21 +1086,21 @@ def send_job_notification(job_data: dict) -> bool:
 
     import requests  # pyre-ignore[21]
 
-    title = job_data.get("title", "Unknown")
-    company = job_data.get("company", "Unknown")
-    location = job_data.get("location", "")
-    salary = job_data.get("salary", "Not listed")
-    remote = job_data.get("remote_status", "Unknown")
-    url = job_data.get("job_url", "")
+    title = _esc(job_data.get("title", "Unknown"))
+    company = _esc(job_data.get("company", "Unknown"))
+    location = _esc(job_data.get("location", ""))
+    salary = _esc(job_data.get("salary", "Not listed"))
+    remote = _esc(job_data.get("remote_status", "Unknown"))
+    url = _esc(job_data.get("job_url", ""))
     job_score = job_data.get("score", 0)
-    grade = job_data.get("grade", "N/A")
+    grade = _esc(job_data.get("grade", "N/A"))
     matched = job_data.get("matched_skills", [])
-    app_type = job_data.get("application_type", "")
-    apply_status = job_data.get("apply_status", "applied")  # applied / failed / external
-    resume_link = job_data.get("resume_drive_link", "")
-    cl_link = job_data.get("cover_letter_drive_link", "")
+    app_type = _esc(job_data.get("application_type", ""))
+    apply_status = job_data.get("apply_status", "applied")
+    resume_link = _esc(job_data.get("resume_drive_link", ""))
+    cl_link = _esc(job_data.get("cover_letter_drive_link", ""))
 
-    matched_str = ", ".join(matched[:8]) if matched else "None"
+    matched_str = ", ".join(_esc(s) for s in matched[:8]) if matched else "None"
 
     if apply_status == "applied":
         header = f"\u2705 <b>Applied \u2014 {title}</b>"

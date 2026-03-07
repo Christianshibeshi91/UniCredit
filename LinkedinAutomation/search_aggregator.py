@@ -6,6 +6,7 @@ then deduplicates across platforms using fuzzy title+company matching.
 
 import os
 import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from dotenv import load_dotenv  # pyre-ignore[21]
 
@@ -94,50 +95,44 @@ def aggregate_jobs(max_jobs: int = 15) -> list:
     all_jobs = []
     jobs_per_platform = max(5, max_jobs // max(len(platforms), 1))
 
-    # LinkedIn (always first — it's the primary source)
+    def _search_linkedin():
+        return ("LinkedIn", linkedin_search(max_jobs=jobs_per_platform))
+
+    def _search_indeed():
+        from LinkedinAutomation.search_indeed_jobs import search as indeed_search  # pyre-ignore[21]
+        return ("Indeed", indeed_search(max_jobs=jobs_per_platform))
+
+    def _search_glassdoor():
+        from LinkedinAutomation.search_glassdoor_jobs import search as glassdoor_search  # pyre-ignore[21]
+        return ("Glassdoor", glassdoor_search(max_jobs=jobs_per_platform))
+
+    def _search_firecrawl(plat):
+        from LinkedinAutomation.search_firecrawl_jobs import search as firecrawl_search  # pyre-ignore[21]
+        return (plat.title(), firecrawl_search(platform=plat, max_jobs=jobs_per_platform))
+
+    # Build list of search tasks
+    search_fns = []
     if "linkedin" in platforms:
-        alert("Aggregator", "Searching LinkedIn...")
-        try:
-            linkedin_jobs = linkedin_search(max_jobs=jobs_per_platform)
-            all_jobs.extend(linkedin_jobs)
-            alert("Aggregator", f"LinkedIn: {len(linkedin_jobs)} jobs")
-        except Exception as e:
-            alert("Aggregator", f"LinkedIn search failed: {e}", "error")
-
-    # Indeed
+        search_fns.append(_search_linkedin)
     if "indeed" in platforms:
-        alert("Aggregator", "Searching Indeed...")
-        try:
-            from LinkedinAutomation.search_indeed_jobs import search as indeed_search  # pyre-ignore[21]
-            indeed_jobs = indeed_search(max_jobs=jobs_per_platform)
-            all_jobs.extend(indeed_jobs)
-            alert("Aggregator", f"Indeed: {len(indeed_jobs)} jobs")
-        except Exception as e:
-            alert("Aggregator", f"Indeed search failed: {e}", "error")
-
-    # Glassdoor
+        search_fns.append(_search_indeed)
     if "glassdoor" in platforms:
-        alert("Aggregator", "Searching Glassdoor...")
-        try:
-            from LinkedinAutomation.search_glassdoor_jobs import search as glassdoor_search  # pyre-ignore[21]
-            glassdoor_jobs = glassdoor_search(max_jobs=jobs_per_platform)
-            all_jobs.extend(glassdoor_jobs)
-            alert("Aggregator", f"Glassdoor: {len(glassdoor_jobs)} jobs")
-        except Exception as e:
-            alert("Aggregator", f"Glassdoor search failed: {e}", "error")
-
-    # Firecrawl-powered platforms (Dice, ZipRecruiter, SimplyHired, Monster, Built In)
+        search_fns.append(_search_glassdoor)
     firecrawl_platforms = ["dice", "ziprecruiter", "simplyhired", "monster", "builtin"]
     for plat in firecrawl_platforms:
         if plat in platforms:
-            alert("Aggregator", f"Searching {plat.title()}...")
+            search_fns.append(lambda p=plat: _search_firecrawl(p))
+
+    alert("Aggregator", f"Launching {len(search_fns)} platform searches in parallel...")
+    with ThreadPoolExecutor(max_workers=min(len(search_fns), 4)) as pool:
+        futures = {pool.submit(fn): fn for fn in search_fns}
+        for fut in as_completed(futures):
             try:
-                from LinkedinAutomation.search_firecrawl_jobs import search as firecrawl_search  # pyre-ignore[21]
-                plat_jobs = firecrawl_search(platform=plat, max_jobs=jobs_per_platform)
-                all_jobs.extend(plat_jobs)
-                alert("Aggregator", f"{plat.title()}: {len(plat_jobs)} jobs")
+                name, jobs = fut.result()
+                all_jobs.extend(jobs)
+                alert("Aggregator", f"{name}: {len(jobs)} jobs")
             except Exception as e:
-                alert("Aggregator", f"{plat.title()} search failed: {e}", "error")
+                alert("Aggregator", f"Platform search failed: {e}", "error")
 
     alert("Aggregator", f"Total before dedup: {len(all_jobs)}")
 

@@ -14,6 +14,7 @@ import json
 import logging
 import os
 import random
+import subprocess
 import sys
 import time
 from datetime import date, datetime
@@ -79,15 +80,10 @@ def run_cycle():
     log.info(f"Starting cycle: {today_count}/{MAX_PER_DAY} today, processing up to {cycle_max}")
 
     try:
-        # Import here to avoid circular imports and pick up env changes
-        from run_daily import main as daily_main
-        # Override sys.argv to pass --max-jobs
-        original_argv = sys.argv
-        sys.argv = ["run_daily.py", "--max-jobs", str(cycle_max)]
-        try:
-            daily_main()
-        finally:
-            sys.argv = original_argv
+        result = subprocess.run(
+            [sys.executable, os.path.join(BASE_DIR, "run_daily.py"), "--max-jobs", str(cycle_max)],
+            cwd=BASE_DIR,
+        )
 
         new_count = _get_today_count()
         applied_this_cycle = new_count - today_count

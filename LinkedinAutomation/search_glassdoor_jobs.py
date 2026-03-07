@@ -1,7 +1,7 @@
-"""Glassdoor job search via Apify scraper.
+"""Glassdoor job search via Firecrawl web search.
 
-Uses the Apify Glassdoor scraper actor to find Power Platform jobs.
-Requires APIFY_API_TOKEN in .env.
+Routes Glassdoor searches through the Firecrawl API to bypass bot detection.
+Requires FIRECRAWL_API_KEY in .env.
 """
 
 import os
@@ -10,12 +10,10 @@ import re
 from dotenv import load_dotenv  # pyre-ignore[21]
 
 from LinkedinAutomation.alert_user import alert  # pyre-ignore[21]
+from LinkedinAutomation.search_utils import passes_filter, extract_salary, normalize_firecrawl_item, extract_firecrawl_items  # pyre-ignore[21]
 
 BASE_DIR = os.path.dirname(os.path.dirname(__file__))
 load_dotenv(os.path.join(BASE_DIR, ".env"))
-
-# Apify Glassdoor scraper actor
-GLASSDOOR_ACTOR_ID = "xzKEFxPhHpPQIAhOi"
 
 SEARCH_TERMS = [
     "Power Platform Developer",
@@ -23,89 +21,96 @@ SEARCH_TERMS = [
     "Power Platform Consultant",
 ]
 
-MUST_HAVE_KEYWORDS = ["power platform", "power apps", "powerapps"]
 
-REJECT_TITLE_KEYWORDS = [
-    "architect", "f&o", "finance and operations", "functional consultant",
-    "functional", "operations", "d365 f&o",
-]
+def _normalize_result(item: dict) -> dict:
+    """Convert a Firecrawl search result into our standard job dict."""
+    url = item.get("url", "")
+    title = item.get("title", "") or ""
+    description = item.get("markdown", "") or item.get("description", "") or ""
 
+    # Clean title — remove " - Glassdoor" suffix
+    title_clean = re.split(r'\s*[-|]\s*(?:Glassdoor|glassdoor\.com)', title)[0].strip()
+    if not title_clean:
+        title_clean = title
 
-def _passes_filter(job: dict) -> bool:
-    title = job.get("title", "").lower()
-    desc = job.get("description", "").lower()
-    combined = title + " " + desc
+    # Extract company from description
+    company = ""
+    for pattern in [
+        r'(?:Company|Employer|Posted by)[:\s]+([^\n|]+)',
+        r'at\s+([A-Z][^\n,|]+?)(?:\s+[-\u2013\u2014]|\s+in\s)',
+    ]:
+        m = re.search(pattern, description, re.IGNORECASE)
+        if m:
+            company = m.group(1).strip()[:100]
+            break
 
-    if not any(kw in combined for kw in MUST_HAVE_KEYWORDS):
-        return False
-    if any(kw in title for kw in REJECT_TITLE_KEYWORDS):
-        return False
-    return True
+    location = ""
+    for pattern in [
+        r'(?:Location|Based in)[:\s]+([^\n|]+)',
+    ]:
+        m = re.search(pattern, description, re.IGNORECASE)
+        if m:
+            location = m.group(1).strip()[:100]
+            break
+    if not location and re.search(r'\bremote\b', description, re.IGNORECASE):
+        location = "Remote"
 
-
-def _normalize_job(item: dict) -> dict:
-    """Convert Apify Glassdoor result to our standard job format."""
-    salary = item.get("salary", "") or ""
-    if not salary:
-        pay_low = item.get("payPercentile10", "")
-        pay_high = item.get("payPercentile90", "")
-        if pay_low and pay_high:
-            salary = f"${pay_low:,} - ${pay_high:,}/yr" if isinstance(pay_low, (int, float)) else f"${pay_low} - ${pay_high}/yr"
+    salary = extract_salary(description)
+    job_id = f"glassdoor-{abs(hash(url)) % 10**10}"
 
     return {
-        "job_id": f"glassdoor-{item.get('id', item.get('jobTitleText', '')[:20])}",
-        "title": item.get("jobTitleText", "") or item.get("title", ""),
-        "company": item.get("employerName", "") or item.get("company", ""),
-        "location": item.get("locationName", "") or item.get("location", ""),
-        "job_url": item.get("jobViewUrl", "") or item.get("url", ""),
-        "description": (item.get("jobDescription", "") or item.get("description", "") or "")[:5000],
+        "job_id": job_id,
+        "title": title_clean[:200],
+        "company": company,
+        "location": location,
+        "job_url": url,
+        "description": description[:5000],
         "salary": salary,
         "is_easy_apply": False,
-        "date_posted": item.get("discoverDate", ""),
+        "date_posted": "",
         "source": "glassdoor",
         "remote_status": "",
     }
 
 
 def search(max_jobs: int = 15) -> list:
-    """Search Glassdoor for Power Platform jobs via Apify."""
-    token = os.getenv("APIFY_API_TOKEN", "")
-    if not token:
-        alert("Glassdoor", "APIFY_API_TOKEN not set, skipping Glassdoor search", "warning")
+    """Search Glassdoor for Power Platform jobs via Firecrawl."""
+    api_key = os.getenv("FIRECRAWL_API_KEY", "")
+    if not api_key:
+        alert("Glassdoor", "FIRECRAWL_API_KEY not set, skipping Glassdoor", "warning")
         return []
 
     try:
-        from apify_client import ApifyClient  # pyre-ignore[21]
+        from firecrawl import Firecrawl  # pyre-ignore[21]
     except ImportError:
-        alert("Glassdoor", "apify-client not installed, skipping Glassdoor", "warning")
+        alert("Glassdoor", "firecrawl-py not installed, skipping Glassdoor", "warning")
         return []
 
-    client = ApifyClient(token)
+    fc = Firecrawl(api_key=api_key)
     all_jobs = []
 
     for term in SEARCH_TERMS:
         if len(all_jobs) >= max_jobs:
             break
 
-        alert("Glassdoor", f"Searching: {term}")
+        query = f"{term} site:glassdoor.com"
+        alert("Glassdoor", f"Searching: {query}")
+
         try:
-            run_input = {
-                "keyword": term,
-                "location": "United States",
-                "maxItems": max_jobs,
-            }
+            results = fc.search(
+                query=query,
+                limit=max_jobs,
+                scrape_options={"formats": ["markdown"]},
+                tbs="qdr:w",  # past week
+            )
 
-            run = client.actor(GLASSDOOR_ACTOR_ID).call(run_input=run_input)
-            dataset_id = run.get("defaultDatasetId")
-            if not dataset_id:
-                continue
-
-            items = list(client.dataset(dataset_id).iterate_items())
+            items = extract_firecrawl_items(results)
             alert("Glassdoor", f"Got {len(items)} results for '{term}'")
 
             for item in items:
-                job = _normalize_job(item)
-                if _passes_filter(job):
+                item = normalize_firecrawl_item(item)
+                job = _normalize_result(item)
+                if passes_filter(job):
                     all_jobs.append(job)
 
         except Exception as e:

@@ -13,6 +13,7 @@ import re
 from dotenv import load_dotenv  # pyre-ignore[21]
 
 from LinkedinAutomation.alert_user import alert  # pyre-ignore[21]
+from LinkedinAutomation.search_utils import passes_filter, extract_salary, normalize_firecrawl_item, extract_firecrawl_items  # pyre-ignore[21]
 
 BASE_DIR = os.path.dirname(os.path.dirname(__file__))
 load_dotenv(os.path.join(BASE_DIR, ".env"))
@@ -31,35 +32,6 @@ SEARCH_TERMS = [
     "Power Platform Consultant",
     "Power Apps Developer",
 ]
-
-MUST_HAVE_KEYWORDS = ["power platform", "power apps", "powerapps"]
-
-REJECT_TITLE_KEYWORDS = [
-    "architect", "f&o", "finance and operations", "functional consultant",
-    "functional", "operations", "d365 f&o",
-]
-
-
-def _passes_filter(job: dict) -> bool:
-    """Apply the same keyword filters as LinkedIn/Indeed/Glassdoor."""
-    title = job.get("title", "").lower()
-    desc = job.get("description", "").lower()
-    combined = title + " " + desc
-
-    if not any(kw in combined for kw in MUST_HAVE_KEYWORDS):
-        return False
-    if any(kw in title for kw in REJECT_TITLE_KEYWORDS):
-        return False
-    return True
-
-
-def _extract_salary(text: str) -> str:
-    """Try to find a salary range in text."""
-    m = re.search(
-        r'\$[\d,]+(?:\.\d+)?(?:\s*[-/\u2013\u2014]\s*\$[\d,]+(?:\.\d+)?)?(?:\s*/\s*(?:yr|year|hr|hour))?',
-        text,
-    )
-    return m.group(0) if m else ""
 
 
 def _extract_company(text: str, url: str) -> str:
@@ -106,7 +78,7 @@ def _normalize_result(result: dict, source: str) -> dict:
 
     company = _extract_company(description, url)
     location = _extract_location(description)
-    salary = _extract_salary(description)
+    salary = extract_salary(description)
 
     return {
         "job_id": job_id,
@@ -169,13 +141,13 @@ def search(platform: str, max_jobs: int = 15) -> list:
                 tbs="qdr:w",  # past week
             )
 
-            # Handle both dict response and direct list
-            items = results if isinstance(results, list) else results.get("data", [])
+            items = extract_firecrawl_items(results)
             alert(platform.title(), f"Got {len(items)} results for '{term}'")
 
             for item in items:
+                item = normalize_firecrawl_item(item)
                 job = _normalize_result(item, source)
-                if _passes_filter(job):
+                if passes_filter(job):
                     all_jobs.append(job)
 
         except Exception as e:
