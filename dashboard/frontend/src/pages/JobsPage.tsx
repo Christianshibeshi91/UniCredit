@@ -8,7 +8,7 @@ import { StatusBadge, Badge } from "@/components/ui/Badge"
 import { Card, CardContent } from "@/components/ui/Card"
 import { RefreshCw, Search, ChevronUp, ChevronDown, Briefcase } from "lucide-react"
 import { toast } from "sonner"
-import { cn } from "@/lib/utils"
+import { cn, formatDate } from "@/lib/utils"
 
 interface JobRow {
   id: number; title: string; company: string; score: number; grade: string
@@ -188,7 +188,7 @@ export default function JobsPage() {
                       <td className="px-4 py-3"><ScoreIndicator score={job.score} /></td>
                       <td className="px-4 py-3"><GradeBadge grade={job.grade} /></td>
                       <td className="px-4 py-3"><StatusBadge status={job.app_status} /></td>
-                      <td className="px-4 py-3 text-muted-foreground text-xs tabular-nums">{job.date_logged}</td>
+                      <td className="px-4 py-3 text-muted-foreground text-xs tabular-nums">{formatDate(job.date_logged)}</td>
                     </tr>
                   ))
                 )}
