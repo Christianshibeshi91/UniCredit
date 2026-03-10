@@ -175,7 +175,13 @@ export default function JobsPage() {
                     </td>
                   </tr>
                 ) : (
-                  data?.jobs.map((job) => (
+                  data?.jobs.slice().sort((a, b) => {
+                    if (sortBy === "date_logged") {
+                      const cmp = new Date(a.date_logged).getTime() - new Date(b.date_logged).getTime()
+                      return sortDir === "desc" ? -cmp : cmp
+                    }
+                    return 0
+                  }).map((job) => (
                     <tr
                       key={job.id}
                       className="border-b hover:bg-muted/30 cursor-pointer transition-colors"
