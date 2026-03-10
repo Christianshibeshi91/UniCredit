@@ -1,8 +1,10 @@
 """Google Sheets to SQLite sync service."""
 import asyncio
 import os
+import re
 import logging
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 
 from sqlmodel import select, delete
 from google.oauth2.credentials import Credentials
@@ -64,6 +66,47 @@ def _fetch_rows():
     return result.get("values", [])
 
 
+PT = ZoneInfo("America/Los_Angeles")
+
+
+def _normalize_date(raw: str) -> str:
+    """Convert any date format from the Sheet to a sortable ISO string."""
+    if not raw:
+        return ""
+    # Already ISO — pass through
+    try:
+        dt = datetime.fromisoformat(raw)
+        return dt.isoformat()
+    except (ValueError, TypeError):
+        pass
+    # Strip timezone abbreviation (PST/PT/PDT/etc)
+    cleaned = re.sub(r"\s+(PST|PDT|PT|EST|EDT|ET|UTC|GMT)$", "", raw, flags=re.IGNORECASE).strip()
+    # MM/DD/YY HH:MM AM/PM
+    m = re.match(r"^(\d{1,2})/(\d{1,2})/(\d{2})\s+(\d{1,2}):(\d{2})\s*(AM|PM)$", cleaned, re.IGNORECASE)
+    if m:
+        year = 2000 + int(m.group(3))
+        hour = int(m.group(4))
+        ampm = m.group(6).upper()
+        if ampm == "PM" and hour != 12:
+            hour += 12
+        if ampm == "AM" and hour == 12:
+            hour = 0
+        dt = datetime(year, int(m.group(1)), int(m.group(2)), hour, int(m.group(5)), tzinfo=PT)
+        return dt.isoformat()
+    # MM/DD/YYYY HH:MM AM/PM
+    m = re.match(r"^(\d{1,2})/(\d{1,2})/(\d{4})\s+(\d{1,2}):(\d{2})\s*(AM|PM)$", cleaned, re.IGNORECASE)
+    if m:
+        hour = int(m.group(4))
+        ampm = m.group(6).upper()
+        if ampm == "PM" and hour != 12:
+            hour += 12
+        if ampm == "AM" and hour == 12:
+            hour = 0
+        dt = datetime(int(m.group(3)), int(m.group(1)), int(m.group(2)), hour, int(m.group(5)), tzinfo=PT)
+        return dt.isoformat()
+    return raw  # Return as-is if unparseable
+
+
 def _row_to_job(row: list, row_idx: int) -> Job:
     # Pad row to 23 columns
     padded = row + [""] * (23 - len(row))
@@ -73,6 +116,8 @@ def _row_to_job(row: list, row_idx: int) -> Job:
         data["score"] = int(data["score"])
     except (ValueError, TypeError):
         data["score"] = 0
+    # Normalize date_logged to ISO for consistent sorting
+    data["date_logged"] = _normalize_date(str(data.get("date_logged", "")))
     data["sheet_row"] = row_idx + 2  # +2 for header + 0-indexed
     return Job(**data)
 
