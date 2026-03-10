@@ -8,7 +8,7 @@ import { StatusBadge, Badge } from "@/components/ui/Badge"
 import { Card, CardContent } from "@/components/ui/Card"
 import { RefreshCw, Search, ChevronUp, ChevronDown, Briefcase } from "lucide-react"
 import { toast } from "sonner"
-import { cn, formatDate } from "@/lib/utils"
+import { cn, formatDate, parseDate } from "@/lib/utils"
 
 interface JobRow {
   id: number; title: string; company: string; score: number; grade: string
@@ -177,8 +177,9 @@ export default function JobsPage() {
                 ) : (
                   data?.jobs.slice().sort((a, b) => {
                     if (sortBy === "date_logged") {
-                      const cmp = new Date(a.date_logged).getTime() - new Date(b.date_logged).getTime()
-                      return sortDir === "desc" ? -cmp : cmp
+                      const da = parseDate(a.date_logged)?.getTime() ?? 0
+                      const db = parseDate(b.date_logged)?.getTime() ?? 0
+                      return sortDir === "desc" ? db - da : da - db
                     }
                     return 0
                   }).map((job) => (
