@@ -1,13 +1,26 @@
-# Secrets
+# Secrets and PII (do not commit)
 .env
 credentials.json
 token.json
 token.json.bak*
 linkedin_auth.json
 candidate/learned_answers.json
+candidate/intake_form.json
+
+# Database
+*.db
+*.db-shm
+*.db-wal
 
 # Temp / scratch
 .tmp/
+
+# Logs and debug artifacts
+*.log
+*.err
+auth_error_screenshot.png
+claude_fix.txt
+vps_update.zip
 
 # Node
 node_modules/
