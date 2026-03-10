@@ -29,6 +29,7 @@ import schedule  # pyre-ignore[21]
 
 from LinkedinAutomation.alert_user import alert  # pyre-ignore[21]
 from LinkedinAutomation.anti_detect import get_human_delay  # pyre-ignore[21]
+from LinkedinAutomation.tmp_cleanup import clean_old_screenshots  # pyre-ignore[21]
 
 RUN_STATE_PATH = os.path.join(BASE_DIR, ".tmp", "run_state.json")
 LOG_PATH = os.path.join(BASE_DIR, ".tmp", "scheduler.log")
@@ -83,7 +84,14 @@ def run_cycle():
         result = subprocess.run(
             [sys.executable, os.path.join(BASE_DIR, "run_daily.py"), "--max-jobs", str(cycle_max)],
             cwd=BASE_DIR,
+            capture_output=True,
+            text=True
         )
+
+        if result.stdout:
+            log.info(f"Child Output:\n{result.stdout}")
+        if result.stderr:
+            log.error(f"Child Error:\n{result.stderr}")
 
         new_count = _get_today_count()
         applied_this_cycle = new_count - today_count
@@ -106,6 +114,10 @@ def main():
     log.info(f"Cycle interval: 30 minutes")
     log.info(f"Max per cycle: {MAX_PER_CYCLE}, Max per day: {MAX_PER_DAY}")
     log.info("=" * 60)
+
+    n = clean_old_screenshots()
+    if n:
+        log.info("Cleanup: removed %d old screenshot(s)", n)
 
     # Run immediately on start
     run_cycle()

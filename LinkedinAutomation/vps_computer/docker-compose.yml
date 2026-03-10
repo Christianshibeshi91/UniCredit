@@ -1,0 +1,47 @@
+services:
+  ai-computer:
+    build: .
+    container_name: ai-computer-agent
+    ports:
+      - "8000:8000" # Only expose the API port
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - MAX_AGENTS=50
+      - MEMORY_POOL_MB=65536
+      - OLLAMA_HOST=http://host.docker.internal:11434
+      - AGENT_API_KEYS=${AGENT_API_KEYS:-}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    # --- SECURITY ISOLATION ---
+    security_opt:
+      - no-new-privileges:true # Can't escalate privileges
+    read_only: true # Filesystem is read-only
+    tmpfs:
+      - /tmp:size=2G # Temp files only in RAM (not on disk)
+      - /home/agent:size=1G # Agent home in RAM only
+    cap_drop:
+      - ALL # Drop ALL Linux capabilities
+    cap_add:
+      - SYS_ADMIN # Needed for Chromium sandbox only
+    # No volumes = ZERO access to host files
+    # No host network = isolated network stack
+    networks:
+      - agent-net
+    deploy:
+      resources:
+        limits:
+          cpus: "10" # Max CPU cores to use (laptop has 12)
+          memory: 6G # laptop-sized
+        reservations:
+          cpus: "2"
+          memory: 2G
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "3"
+
+networks:
+  agent-net:
+    driver: bridge # Isolated network, not host

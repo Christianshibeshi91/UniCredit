@@ -6,6 +6,10 @@ token.json.bak*
 linkedin_auth.json
 candidate/learned_answers.json
 candidate/intake_form.json
+candidate/profile.json
+
+# IDE / Claude local settings
+.claude/settings.local.json
 
 # Database
 *.db

@@ -13,10 +13,12 @@ other ATS platforms by:
 
 import asyncio
 import os
+import re
 
 from playwright.async_api import async_playwright  # pyre-ignore[21]
 
 from LinkedinAutomation.alert_user import alert  # pyre-ignore[21]
+from LinkedinAutomation import safe_job_id  # pyre-ignore[21]
 from LinkedinAutomation.anti_detect import (  # pyre-ignore[21]
     get_human_delay,
     get_random_ua,
@@ -36,6 +38,7 @@ from LinkedinAutomation.apply_easy_apply import (  # pyre-ignore[21]
     _save_run_state,
 )
 from LinkedinAutomation.apply_external import extract_url  # pyre-ignore[21]
+from LinkedinAutomation.apply_security import sanitize_url, safe_resume_path_with_fallback  # pyre-ignore[21]
 
 BASE_DIR = os.path.dirname(os.path.dirname(__file__))
 SCREENSHOTS_DIR = os.path.join(BASE_DIR, ".tmp", "screenshots")
@@ -67,10 +70,10 @@ async def _get_field_label(element, page):
     # Strategy 1: aria-label attribute
     label_text = await element.get_attribute("aria-label") or ""
 
-    # Strategy 2: associated <label> via id
+    # Strategy 2: associated <label> via id (sanitize to prevent selector injection)
     if not label_text:
-        el_id = await element.get_attribute("id") or ""
-        if el_id:
+        el_id = (await element.get_attribute("id") or "").strip()
+        if el_id and re.match(r"^[a-zA-Z0-9_\-]+$", el_id):
             label_el = await page.query_selector(f"label[for='{el_id}']")
             if label_el:
                 label_text = (await label_el.text_content() or "").strip()
@@ -339,24 +342,32 @@ async def _click_page_button(page, text_patterns, timeout=3000):
 
 async def _apply_external_async(job, resume_path, ask_callback=None):
     """Full automated external application flow."""
-    job_id = job.get("job_id", "unknown")
+    job_id = safe_job_id(job.get("job_id", "unknown"))
     title = job.get("title", "Unknown")
     company = job.get("company", "Unknown")
     job_title = f"{title} at {company}"
 
-    # Step 1: Extract external application URL
+    # Step 1: Extract external application URL (extract_url already sanitizes)
     alert("External Apply", f"Finding application URL for {title}...")
     external_url = extract_url(job)
 
     if not external_url:
         alert("External Apply", f"No external URL found for {title}", "warning")
         return False
+    if not sanitize_url(external_url):
+        alert("External Apply", "Blocked unsafe external URL", "error")
+        return False
+
+    resume_requested = (resume_path or "").strip()
+    resume_path = safe_resume_path_with_fallback(resume_requested, BASE_DIR)
+    if resume_requested and resume_path is None:
+        alert("External Apply", "Resume path rejected or not found (allowed: .tmp/, candidate/)", "warning")
 
     alert("External Apply", f"Applying at: {external_url}")
     intake = _load_intake_form()
 
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=False)
+        browser = await p.chromium.launch(headless=os.getenv("HEADLESS", "true").lower() == "true")
         context = await browser.new_context(
             viewport=get_viewport(),
             user_agent=get_random_ua(),
@@ -480,7 +491,7 @@ async def apply_external_async(job, resume_path, max_per_day=15, ask_callback=No
     return await _apply_external_async(job, resume_path, ask_callback=ask_callback)
 
 
-def apply_external(job, resume_path, max_per_day=15):
+def apply_external(job, resume_path, max_per_day=15, ask_callback=None):
     """Sync entry point for external applications.
 
     Use from run_daily.py.
@@ -488,7 +499,7 @@ def apply_external(job, resume_path, max_per_day=15):
     if not _check_daily_cap(max_per_day):
         alert("Daily Cap", "Maximum daily applications reached.", "warning")
         return False
-    return asyncio.run(_apply_external_async(job, resume_path))
+    return asyncio.run(_apply_external_async(job, resume_path, ask_callback=ask_callback))
 
 
 if __name__ == "__main__":

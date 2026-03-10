@@ -12,6 +12,7 @@ from dotenv import load_dotenv  # pyre-ignore[21]
 
 from LinkedinAutomation.alert_user import alert  # pyre-ignore[21]
 from LinkedinAutomation.ollama_client import generate_json as ollama_json, is_available as ollama_available  # pyre-ignore[21]
+from LinkedinAutomation import safe_job_id, load_profile as _safe_load_profile  # pyre-ignore[21]
 
 BASE_DIR = os.path.dirname(os.path.dirname(__file__))
 load_dotenv(os.path.join(BASE_DIR, ".env"))
@@ -20,8 +21,7 @@ PROFILE_PATH = os.path.join(BASE_DIR, "candidate", "profile.json")
 
 
 def _load_profile():
-    with open(PROFILE_PATH, "r") as f:
-        return json.load(f)
+    return _safe_load_profile(PROFILE_PATH)
 
 
 def _build_scoring_prompt(job, profile):
@@ -170,7 +170,7 @@ def _local_score(job, profile):
         },
         "leadership_opportunity_level": "High" if leadership >= 10 else "Medium" if leadership >= 5 else "Low",
         "enterprise_relevance_score": enterprise_alignment * 5,
-        "should_reject": total < 70,
+        "should_reject": total < int(os.getenv("MIN_SCORE_THRESHOLD", "70")),
         "scoring_rationale": f"Local keyword scoring: {len(matched)}/{len(matched)+len(missing)} skills matched. Score {total}/100.",
     }
     return result
@@ -200,7 +200,7 @@ def score(job, profile=None):
     alert("Score", "Using free local keyword-based scoring")
     result = _local_score(job, profile)
 
-    job_id = job.get("job_id", "unknown")
+    job_id = safe_job_id(job.get("job_id", "unknown"))
     out_path = os.path.join(BASE_DIR, ".tmp", f"score_{job_id}.json")
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     with open(out_path, "w") as f:

@@ -4,15 +4,18 @@ import json
 import os
 
 from LinkedinAutomation.anti_detect import get_random_ua, get_viewport  # pyre-ignore[21]
+from LinkedinAutomation.apply_security import restrict_file_permissions  # pyre-ignore[21]
 
 AUTH_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "linkedin_auth.json")
 
 
 async def save_auth(context) -> None:
-    """Dump Playwright browser context storage state to linkedin_auth.json."""
+    """Dump Playwright browser context storage state to linkedin_auth.json.
+    File is written with owner-only read/write permissions (0o600)."""
     state = await context.storage_state()
     with open(AUTH_PATH, "w") as f:
         json.dump(state, f, indent=2)
+    restrict_file_permissions(AUTH_PATH)
 
 
 async def load_auth(browser, viewport=None, user_agent=None):

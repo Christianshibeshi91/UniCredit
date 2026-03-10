@@ -8,6 +8,7 @@ from dotenv import load_dotenv  # pyre-ignore[21]
 
 from LinkedinAutomation.alert_user import alert  # pyre-ignore[21]
 from LinkedinAutomation.ollama_client import generate as ollama_generate, is_available as ollama_available, OLLAMA_WRITING_MODEL  # pyre-ignore[21]
+from LinkedinAutomation import safe_job_id, load_profile as _safe_load_profile  # pyre-ignore[21]
 
 BASE_DIR = os.path.dirname(os.path.dirname(__file__))
 load_dotenv(os.path.join(BASE_DIR, ".env"))
@@ -22,8 +23,7 @@ FORBIDDEN_PHRASES = [
 
 
 def _load_profile():
-    with open(PROFILE_PATH, "r") as f:
-        return json.load(f)
+    return _safe_load_profile(PROFILE_PATH)
 
 
 def _clean_cl_output(text):
@@ -63,8 +63,15 @@ def _clean_cl_output(text):
     text = text.replace('`', '')
 
     # Replace em dashes and en dashes
-    text = text.replace('\u2014', ',')   # em dash -> comma
-    text = text.replace('\u2013', '-')   # en dash -> hyphen
+    # Between words (no spaces): use hyphen (e.g., "well—positioned" -> "well-positioned")
+    text = re.sub(r'(\w)\u2014(\w)', r'\1-\2', text)
+    text = re.sub(r'(\w)\u2013(\w)', r'\1-\2', text)
+    # Standalone (with spaces or at boundaries): use comma
+    text = text.replace('\u2014', ',')
+    text = text.replace('\u2013', ',')
+    # Also catch any remaining dash-like Unicode characters
+    text = text.replace('\u2012', '-')  # figure dash
+    text = text.replace('\u2015', ',')  # horizontal bar
 
     # Expand contractions
     contractions = {
@@ -119,7 +126,7 @@ RULES:
   Exactly 4 paragraphs, 350 to 500 words
   Close with "Sincerely," followed by a new line and "Christian Shibeshi"
   Tone: strategic, executive, confident but HUMAN. Must NOT sound like AI wrote it.
-  NO em dashes. Use commas or periods instead.
+  ABSOLUTELY NO em dashes (—) or en dashes (–) ANYWHERE. Use regular hyphens (-) for compound words like "well-positioned" or "low-code". Use commas or periods for sentence breaks. NEVER use the — character.
   NO contractions. Write "I have" not "I've", "I am" not "I'm", "do not" not "don't".
   NO overused AI phrases: "spearheaded", "synergized", "leveraged", "cutting-edge", "passionate about", "results-driven", "thrilled", "excited to".
   Use direct, concrete language. Write like a senior professional, not a chatbot.
@@ -187,7 +194,7 @@ def generate(job, score_data, profile=None):
         alert("Cover Letter", "Using free template-based cover letter")
         cl_text = _local_cover_letter(job, score_data, profile)
 
-    job_id = job.get("job_id", "unknown")
+    job_id = safe_job_id(job.get("job_id", "unknown"))
     out_path = os.path.join(BASE_DIR, ".tmp", f"cl_{job_id}.txt")
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     with open(out_path, "w", encoding="utf-8") as f:

@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.backends._legacy:_Backend"
+
+[project]
+name = "web-scraper-engine"
+version = "0.1.0"
+description = "Universal stealth web scraping framework with AI extraction, captcha solving, and modular output."
+readme = "web_scrapper.md"
+license = {text = "MIT"}
+requires-python = ">=3.10"
+
+dependencies = [
+    "playwright>=1.44.0",
+    "beautifulsoup4>=4.12.0",
+    "lxml>=5.0.0",
+    "requests>=2.32.0",
+    "python-dotenv>=1.0.1",
+    "thefuzz>=0.22.1",
+]
+
+[project.optional-dependencies]
+captcha = [
+    "2captcha-python>=1.2.0",
+    "anticaptchaofficial>=1.0.0",
+]
+sheets = [
+    "google-api-python-client>=2.130.0",
+    "google-auth-httplib2>=0.2.0",
+    "google-auth-oauthlib>=1.2.0",
+]
+all = [
+    "web-scraper-engine[captcha,sheets]",
+]
+
+[tool.setuptools]
+packages = ["web_scraper"]

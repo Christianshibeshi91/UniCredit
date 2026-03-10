@@ -146,7 +146,7 @@ log_data = {
 sheet_row = log_job(log_data)
 alert("TEST", f"Logged to Google Sheet row: {sheet_row}")
 
-# Step 7: Send Telegram approval card
+# Step 7: Send Telegram approval card (resume_file as filename to match run_daily / PDF fallback)
 alert("TEST", "Step 7: Sending Telegram approval card...")
 approval_data = {
     "job_id": "test-e2e-001",
@@ -165,7 +165,7 @@ approval_data = {
     "connections_summary": "TEST - No real connection lookup",
     "best_contact": "TEST",
     "outreach_message": "",
-    "resume_file": resume_pdf,
+    "resume_file": "resume_test-e2e-001.txt",
     "cover_letter_text": cl_text,
     "sheet_row": sheet_row,
 }

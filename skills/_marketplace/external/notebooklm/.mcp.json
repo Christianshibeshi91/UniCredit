@@ -1,0 +1,6 @@
+{
+  "notebooklm": {
+    "command": "npx",
+    "args": ["@pan-sec/notebooklm-mcp@latest"]
+  }
+}

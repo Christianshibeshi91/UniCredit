@@ -32,6 +32,7 @@ from LinkedinAutomation.find_connections import find  # pyre-ignore[21]
 from LinkedinAutomation.log_to_sheets import log_job, update_job_status  # pyre-ignore[21]
 from LinkedinAutomation.apply_easy_apply import apply as easy_apply  # pyre-ignore[21]
 from LinkedinAutomation.apply_external_form import apply_external  # pyre-ignore[21]
+from LinkedinAutomation.telegram_bot import get_scheduler_ask_callback  # pyre-ignore[21]
 from LinkedinAutomation.mark_job_seen import mark_seen  # pyre-ignore[21]
 from LinkedinAutomation.telegram_bot import send_job_notification  # pyre-ignore[21]
 from LinkedinAutomation.generate_daily_report import send_daily_report  # pyre-ignore[21]
@@ -40,9 +41,15 @@ from LinkedinAutomation.interview_prep import check_interview_statuses  # pyre-i
 from LinkedinAutomation.anti_detect import get_human_delay  # pyre-ignore[21]
 from LinkedinAutomation.upload_to_drive import upload_file as drive_upload  # pyre-ignore[21]
 from LinkedinAutomation.generate_pdf import generate_resume_pdf, generate_cover_letter_pdf  # pyre-ignore[21]
+from LinkedinAutomation.tmp_cleanup import clean_old_screenshots  # pyre-ignore[21]
+from LinkedinAutomation.apply_security import restrict_file_permissions  # pyre-ignore[21]
 
 RUN_STATE_PATH = os.path.join(BASE_DIR, ".tmp", "run_state.json")
 PROFILE_PATH = os.path.join(BASE_DIR, "candidate", "profile.json")
+CANDIDATE_PII_FILES = (
+    os.path.join(BASE_DIR, "candidate", "intake_form.json"),
+    os.path.join(BASE_DIR, "candidate", "learned_answers.json"),
+)
 
 # Companies to never apply to (case-insensitive match)
 BLOCKED_COMPANIES = [
@@ -80,6 +87,14 @@ def main():
 
     alert("Daily Run", f"Starting job discovery (max {args.max_jobs} jobs)")
 
+    # Prune old screenshots (PII / disk)
+    n = clean_old_screenshots()
+    if n:
+        alert("Cleanup", f"Removed {n} old screenshot(s)")
+    for path in CANDIDATE_PII_FILES:
+        if os.path.isfile(path):
+            restrict_file_permissions(path)
+
     # Reset state if new day
     state = _load_run_state()
     today = date.today().isoformat()
@@ -89,6 +104,12 @@ def main():
 
     profile = _load_profile()
     min_score = int(os.getenv("MIN_SCORE_THRESHOLD", "70"))
+
+    # Get thread-safe ask_callback for Telegram Q&A during form filling
+    try:
+        ask_cb = get_scheduler_ask_callback()
+    except Exception:
+        ask_cb = None
 
     # Step 1: Search all platforms (LinkedIn + Indeed + Glassdoor)
     alert("Step 1", "Searching all platforms for jobs...")
@@ -222,7 +243,7 @@ def main():
             if job.get("is_easy_apply"):
                 alert("Auto Apply", f"Attempting Easy Apply for {title}...")
                 try:
-                    result = easy_apply(job, resume_pdf, cl_text)
+                    result = easy_apply(job, resume_pdf, cl_text, ask_callback=ask_cb)
                     if result:
                         apply_status = "applied"
                         applied_str = "Yes"
@@ -239,7 +260,7 @@ def main():
                 # External application — auto-fill ATS forms
                 alert("External Apply", f"Attempting external application for {title}...")
                 try:
-                    result = apply_external(job, resume_pdf)
+                    result = apply_external(job, resume_pdf, ask_callback=ask_cb)
                     if result:
                         apply_status = "applied"
                         applied_str = "Yes"
@@ -313,7 +334,7 @@ def main():
             mark_seen(job.get("job_url", ""))
 
     # Save final state
-    state["applications_today"] = processed  # pyre-ignore[29]
+    state["applications_today"] = state.get("applications_today", 0) + processed  # pyre-ignore[29]
     state["jobs_processed"] = jobs_processed_list  # pyre-ignore[29]
     state["errors"] = errors_list  # pyre-ignore[29]
     _save_run_state(state)

@@ -18,6 +18,12 @@ from playwright.async_api import async_playwright  # pyre-ignore[21]
 
 from LinkedinAutomation.save_linkedin_auth import load_auth  # pyre-ignore[21]
 from LinkedinAutomation.alert_user import alert  # pyre-ignore[21]
+from LinkedinAutomation import safe_job_id  # pyre-ignore[21]
+from LinkedinAutomation.apply_security import (  # pyre-ignore[21]
+    sanitize_url,
+    safe_resume_path_with_fallback,
+    restrict_file_permissions,
+)
 from LinkedinAutomation.anti_detect import (  # pyre-ignore[21]
     get_human_delay,
     get_human_delay_ms,
@@ -127,7 +133,7 @@ def _load_learned_answers():
 
 
 def _save_learned_answer(label, answer):
-    """Persist a new learned answer (atomic write)."""
+    """Persist a new learned answer (atomic write). Restricts permissions to owner only (PII)."""
     learned = _load_learned_answers()
     learned[label.strip()] = answer.strip()  # pyre-ignore[29]
     tmp_path = LEARNED_ANSWERS_PATH + ".tmp"
@@ -135,6 +141,7 @@ def _save_learned_answer(label, answer):
     with open(tmp_path, "w", encoding="utf-8") as f:
         json.dump(learned, f, indent=2, ensure_ascii=False)
     os.replace(tmp_path, LEARNED_ANSWERS_PATH)
+    restrict_file_permissions(LEARNED_ANSWERS_PATH)
 
 
 def _match_field_to_answer(label_text, intake):
@@ -528,15 +535,26 @@ async def _click_button(page, button_texts):
 
 async def _apply_async(job, resume_path, cover_letter_text, ask_callback=None):
     """Full automated Easy Apply flow."""
-    job_id = job.get("job_id", "unknown")
+    job_id = safe_job_id(job.get("job_id", "unknown"))
     job_url = job.get("job_url", "")
     title = job.get("title", "Unknown")
     company = job.get("company", "Unknown")
 
+    safe_url = sanitize_url(job_url)
+    if not safe_url:
+        alert("Easy Apply", f"Blocked unsafe job URL for {title}", "error")
+        return False
+    job_url = safe_url
+
+    resume_requested = (resume_path or "").strip()
+    resume_path = safe_resume_path_with_fallback(resume_requested, BASE_DIR)
+    if resume_requested and resume_path is None:
+        alert("Easy Apply", "Resume path rejected or not found (allowed: .tmp/, candidate/)", "warning")
+
     intake = _load_intake_form()
 
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=False)
+        browser = await p.chromium.launch(headless=os.getenv("HEADLESS", "true").lower() == "true")
         viewport = get_viewport()
         ua = get_random_ua()
 
@@ -698,7 +716,7 @@ async def apply_async(job, resume_path, cover_letter, max_per_day=15, ask_callba
     return await _apply_async(job, resume_path, cover_letter, ask_callback=ask_callback)
 
 
-def apply(job, resume_path, cover_letter, max_per_day=15):
+def apply(job, resume_path, cover_letter, max_per_day=15, ask_callback=None):
     """Apply to a job via LinkedIn Easy Apply. Fully automated (sync wrapper).
 
     Args:
@@ -706,6 +724,7 @@ def apply(job, resume_path, cover_letter, max_per_day=15):
         resume_path: Path to the resume file to upload.
         cover_letter: Cover letter text (logged but not always used in Easy Apply).
         max_per_day: Maximum applications per day.
+        ask_callback: Optional async callback for asking admin about unknown fields.
 
     Returns:
         True if application was submitted, False otherwise.
@@ -713,7 +732,7 @@ def apply(job, resume_path, cover_letter, max_per_day=15):
     if not _check_daily_cap(max_per_day):
         alert("Daily Cap", "Maximum daily applications reached.", "warning")
         return False
-    return asyncio.run(_apply_async(job, resume_path, cover_letter))
+    return asyncio.run(_apply_async(job, resume_path, cover_letter, ask_callback=ask_callback))
 
 
 if __name__ == "__main__":

@@ -60,6 +60,7 @@ VIEWER_CHAT_IDS = [
 # and waits on the Event. The text_reply_handler fills in the answer.
 _pending_question: dict | None = None
 _bot_application: Application | None = None
+_bot_loop: asyncio.AbstractEventLoop | None = None  # bot's event loop (set in run_bot)
 
 
 def _esc(text: str) -> str:
@@ -263,6 +264,9 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         return
 
     data = query.data
+    if not data or ":" not in data:
+        await query.edit_message_text("Invalid callback data.")
+        return
     action, job_id = data.split(":", 1)
 
     pending = load_pending()
@@ -498,17 +502,30 @@ async def logs_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     )
 
 
+# Shell PIN must be set in .env (no default). If unset, /shell is disabled.
+_SHELL_PIN = os.getenv("SHELL_PIN", "").strip()
+
+
 async def shell_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle /shell <command> — run an arbitrary shell command."""
+    """Handle /shell <PIN> <command> — run a shell command (requires PIN)."""
     if not _is_admin(update):
         await update.message.reply_text("\u26d4 Unauthorized.")
         return
 
-    if not context.args:
-        await update.message.reply_text("Usage: /shell <command>\nExample: /shell dir .tmp")
+    if not _SHELL_PIN:
+        await update.message.reply_text("\u26a0\ufe0f Shell is disabled. Set SHELL_PIN in .env to enable.")
         return
 
-    cmd = " ".join(context.args)
+    if not context.args or len(context.args) < 2:
+        await update.message.reply_text("Usage: /shell <PIN> <command>")
+        return
+
+    pin = context.args[0]
+    if pin != _SHELL_PIN:
+        await update.message.reply_text("\u26d4 Invalid PIN.")
+        return
+
+    cmd = " ".join(context.args[1:])
     await update.message.reply_text(f"\u23f3 Running: <code>{cmd}</code>", parse_mode="HTML")
 
     try:
@@ -702,6 +719,98 @@ def _create_ask_admin_callback():
     return ask_callback
 
 
+def get_scheduler_ask_callback():
+    """Create a thread-safe ask_callback for use from the scheduler thread.
+
+    This bridges the scheduler thread (which runs its own asyncio loop for
+    Playwright) to the bot's event loop (which handles Telegram messaging).
+    Uses threading.Event for cross-thread synchronization.
+    """
+    import threading as _threading
+
+    async def ask_callback(question: str, screenshot_path: str) -> str | None:
+        global _pending_question
+
+        if not _bot_application or not ADMIN_CHAT_IDS or not _bot_loop:
+            return None
+
+        # Threading event for cross-thread sync
+        reply_event = _threading.Event()
+
+        # Send question via bot's event loop
+        async def _send_question():
+            global _pending_question
+            bot = _bot_application.bot  # pyre-ignore[16]
+
+            async_event = asyncio.Event()
+            _pending_question = {
+                "event": async_event,
+                "answer": None,
+                "thread_event": reply_event,
+                "thread_answer": None,
+            }
+
+            for chat_id in ADMIN_CHAT_IDS:
+                try:
+                    if screenshot_path and os.path.exists(screenshot_path):
+                        with open(screenshot_path, "rb") as photo:
+                            await bot.send_photo(
+                                chat_id=chat_id,
+                                photo=photo,
+                                caption=question[:1024],
+                            )
+                    else:
+                        await bot.send_message(chat_id=chat_id, text=question)
+                except Exception as e:
+                    alert("Telegram Q&A", f"Failed to send question: {e}", "error")
+                    _pending_question = None
+                    reply_event.set()  # unblock the waiting thread
+                    return
+
+        # Submit send to the bot's loop
+        future = asyncio.run_coroutine_threadsafe(_send_question(), _bot_loop)
+        try:
+            future.result(timeout=15)
+        except Exception as e:
+            alert("Telegram Q&A", f"Could not send question: {e}", "error")
+            return None
+
+        # Wait for admin reply using run_in_executor (non-blocking for our event loop)
+        loop = asyncio.get_event_loop()
+        replied = await loop.run_in_executor(None, lambda: reply_event.wait(timeout=300))
+
+        if not replied:
+            # Timeout — notify admin
+            async def _send_timeout():
+                global _pending_question
+                bot = _bot_application.bot  # pyre-ignore[16]
+                for chat_id in ADMIN_CHAT_IDS:
+                    try:
+                        await bot.send_message(
+                            chat_id=chat_id,
+                            text="Timed out waiting for answer. Skipping field.",
+                        )
+                    except Exception:
+                        pass
+                _pending_question = None
+
+            asyncio.run_coroutine_threadsafe(_send_timeout(), _bot_loop)
+            return None
+
+        answer = _pending_question.get("thread_answer") if _pending_question else None
+        # Clean up
+        async def _cleanup():
+            global _pending_question
+            _pending_question = None
+        asyncio.run_coroutine_threadsafe(_cleanup(), _bot_loop)
+
+        if answer and answer.strip().lower() == "/skip":
+            return None
+        return answer
+
+    return ask_callback
+
+
 async def text_reply_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle admin's text reply to a form field question."""
     global _pending_question
@@ -720,6 +829,12 @@ async def text_reply_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
     answer = update.message.text.strip()
     _pending_question["answer"] = answer  # pyre-ignore[29]
     _pending_question["event"].set()  # pyre-ignore[29]
+
+    # Also signal threading event for cross-thread callers (scheduler)
+    thread_event = _pending_question.get("thread_event")  # pyre-ignore[29]
+    if thread_event is not None:
+        _pending_question["thread_answer"] = answer  # pyre-ignore[29]
+        thread_event.set()
 
     if answer.lower() == "/skip":
         await update.message.reply_text("Skipping this field.")
@@ -1150,7 +1265,7 @@ def send_job_notification(job_data: dict) -> bool:
 
 def run_bot() -> None:
     """Start the long-running Telegram bot."""
-    global _bot_application
+    global _bot_application, _bot_loop
 
     if not BOT_TOKEN:
         print("ERROR: TELEGRAM_BOT_TOKEN not set in .env")
@@ -1158,7 +1273,12 @@ def run_bot() -> None:
 
     alert("Telegram Bot", "Starting LinkApply bot...")
 
-    app = Application.builder().token(BOT_TOKEN).build()
+    async def _post_init(application: Application) -> None:
+        global _bot_loop
+        _bot_loop = asyncio.get_running_loop()
+        alert("Telegram Bot", "Bot event loop captured for scheduler bridge")
+
+    app = Application.builder().token(BOT_TOKEN).post_init(_post_init).build()
     _bot_application = app
 
     # Register handlers

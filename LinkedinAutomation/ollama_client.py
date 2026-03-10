@@ -6,6 +6,7 @@ if Ollama isn't running.
 
 import json
 import os
+import time
 
 import requests  # pyre-ignore[21]
 
@@ -15,25 +16,29 @@ _session = requests.Session()
 from LinkedinAutomation.alert_user import alert  # pyre-ignore[21]
 
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen3:4b")
-OLLAMA_WRITING_MODEL = os.getenv("OLLAMA_WRITING_MODEL", "qwen3:4b")
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen3:8b")
+OLLAMA_WRITING_MODEL = os.getenv("OLLAMA_WRITING_MODEL", "gemma2:9b")
 
 
-# Cache the availability check for the session lifetime
+# Cache availability with a 5-minute TTL
 _available_cache = None
+_available_cache_time = 0.0
+_CACHE_TTL = 300  # 5 minutes
 
 
 def is_available():
-    """Check if Ollama is running and has a model loaded."""
-    global _available_cache
-    if _available_cache is not None:
+    """Check if Ollama is running and has a model loaded. Re-checks every 5 minutes."""
+    global _available_cache, _available_cache_time
+    if _available_cache is not None and (time.time() - _available_cache_time) < _CACHE_TTL:
         return _available_cache
     try:
         r = _session.get(f"{OLLAMA_URL}/api/tags", timeout=3)
         _available_cache = r.status_code == 200
+        _available_cache_time = time.time()
         return _available_cache
     except Exception:
         _available_cache = False
+        _available_cache_time = time.time()
         return False
 
 

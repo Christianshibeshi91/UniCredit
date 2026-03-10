@@ -80,8 +80,32 @@ class ResumePDF(FPDF):
         self.set_font("Helvetica", size=10)
 
 
+_DATE_RE = re.compile(
+    r'(Jan|Feb|Mar|Apr|May|Jun|Jul|July|Aug|Sep|Oct|Nov|Dec)\s+\d{4}\s*[-]\s*'
+    r'(Jan|Feb|Mar|Apr|May|Jun|Jul|July|Aug|Sep|Oct|Nov|Dec)\s+\d{4}|'
+    r'(Jan|Feb|Mar|Apr|May|Jun|Jul|July|Aug|Sep|Oct|Nov|Dec)\s+\d{4}\s*[-]\s*Present',
+    re.IGNORECASE,
+)
+
+
+def _has_date(line: str) -> bool:
+    """Check if a line contains a date range pattern."""
+    return bool(_DATE_RE.search(line))
+
+
+def _extract_date(line: str) -> tuple[str, str]:
+    """Extract (date string, title portion before the date) from a line."""
+    m = _DATE_RE.search(line)
+    if m:
+        date_str = m.group(0).strip()
+        title_part = line.replace(date_str, "").strip()
+        return date_str, title_part
+    return "", line.strip()
+
+
 def _parse_resume_text(text: str) -> ResumeData:
     """Parse the plain-text resume into structured sections."""
+
     lines = text.strip().split("\n")
 
     name = ""
@@ -96,6 +120,9 @@ def _parse_resume_text(text: str) -> ResumeData:
     current_section = "header"
     current_exp: ExperienceEntry | None = None
     header_lines: List[str] = []
+    # For gold resume format: after detecting a title+date line, next non-empty
+    # non-bullet line is the company line.
+    _awaiting_company = False
 
     for line in lines:
         stripped = line.strip()
@@ -105,7 +132,7 @@ def _parse_resume_text(text: str) -> ResumeData:
         if upper == "PROFESSIONAL SUMMARY":
             current_section = "summary"
             continue
-        elif upper in ("CORE COMPETENCIES", "CORE SKILLS", "SKILLS"):
+        elif upper in ("CORE COMPETENCIES", "CORE SKILLS", "SKILLS", "TECHNICAL SKILLS"):
             current_section = "skills"
             continue
         elif upper == "PROFESSIONAL EXPERIENCE":
@@ -127,13 +154,14 @@ def _parse_resume_text(text: str) -> ResumeData:
                 summary += (" " + stripped) if summary else stripped  # pyre-ignore[58]
         elif current_section == "skills":
             if stripped:
-                # Use double-space separator to preserve category lines
-                skills += ("  " + stripped) if skills else stripped  # pyre-ignore[58]
+                # Use newline separator to preserve category lines
+                skills += ("\n" + stripped) if skills else stripped  # pyre-ignore[58]
         elif current_section == "experience":
             if not stripped:
                 continue
-            # Check if it's a company line (contains |)
-            if "|" in stripped and not stripped.startswith(" "):
+
+            # Format 1: Pipe-separated — "Title | Company | Location | Dates"
+            if "|" in stripped and not stripped.startswith("-"):
                 if current_exp:
                     experience.append(current_exp)  # pyre-ignore[6]
                 parts = [p.strip() for p in stripped.split("|")]
@@ -143,6 +171,26 @@ def _parse_resume_text(text: str) -> ResumeData:
                     "duration": parts[2] if len(parts) > 2 else "",
                     "bullets": [],
                 }
+                _awaiting_company = False
+
+            # Format 2: Gold resume — title line with date at end, company on next line
+            elif not stripped.startswith("-") and _has_date(stripped):
+                if current_exp:
+                    experience.append(current_exp)  # pyre-ignore[6]
+                dur, exp_title = _extract_date(stripped)
+                current_exp = {  # pyre-ignore[9]
+                    "company": "",
+                    "title": exp_title,
+                    "duration": dur,
+                    "bullets": [],
+                }
+                _awaiting_company = True
+
+            # Company line (follows a gold-format title line)
+            elif _awaiting_company and current_exp and not stripped.startswith("-"):
+                current_exp["company"] = stripped  # pyre-ignore[29]
+                _awaiting_company = False
+
             elif current_exp:
                 current_exp["bullets"].append(stripped)  # pyre-ignore[29]
         elif current_section == "certifications":
@@ -214,23 +262,22 @@ def generate_resume_pdf(text: str, output_path: str) -> str:
         pdf._section_header("Core Competencies")
         pdf.set_text_color(*DARK_GRAY)
 
-        # Check if skills use "Category: items" format
-        skill_lines = [s.strip() for s in data["skills"].split("  ") if s.strip()]
+        # Split into lines (preserved from parser)
+        skill_lines = [s.strip() for s in data["skills"].split("\n") if s.strip()]
         has_categories = any(":" in line for line in skill_lines)
 
         if has_categories:
             # Two-column table: bold category label | items
-            label_col_w = 42  # fixed width for category labels
+            label_col_w = 45  # fixed width for category labels
             items_col_w = pdf.w - 40 - label_col_w  # remaining width
 
             for line in skill_lines:
                 if ":" in line:
                     cat, items = line.split(":", 1)
-                    y_before = pdf.get_y()
                     # Category label (bold, left column)
                     pdf.set_font("Helvetica", "B", 9)
                     pdf.set_x(20)
-                    pdf.cell(label_col_w, 5, cat.strip())
+                    pdf.cell(label_col_w, 5, cat.strip() + ":")
                     # Items (regular, right column with wrapping)
                     pdf.set_font("Helvetica", size=9)
                     pdf.set_x(20 + label_col_w)
@@ -240,6 +287,13 @@ def generate_resume_pdf(text: str, output_path: str) -> str:
                     pdf.set_font("Helvetica", size=9)
                     pdf.multi_cell(0, 5, line, align="L")
                     pdf.ln(1)
+        elif "|" in data["skills"]:
+            # Pipe-separated skill groups (one group per line)
+            pdf.set_font("Helvetica", size=9)
+            for line in skill_lines:
+                pdf.set_x(20)
+                pdf.multi_cell(0, 5, line, align="L")
+                pdf.ln(1)
         else:
             # Flat comma-separated list in 3 columns
             skill_list = [s.strip() for s in data["skills"].split(",") if s.strip()]

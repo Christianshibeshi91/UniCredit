@@ -1,6 +1,7 @@
 """Console logging + desktop notifications for the job automation pipeline."""
 
 import logging
+import os
 import sys
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -31,21 +32,26 @@ def _ensure_logger():
 def alert(title: str, message: str, level: str = "info") -> None:
     """Print to console and attempt a desktop notification via plyer."""
     _ensure_logger()
-    log_fn = {"info": logger.info, "warning": logger.warning, "error": logger.error}.get(
-        level, logger.info
-    )
-    log_fn(f"{title} -- {message}")
+    msg = f"{title} -- {message}"
+    if level == "error":
+        logger.error(msg)
+    elif level == "warning":
+        logger.warning(msg)
+    else:
+        logger.info(msg)
 
-    try:
-        from plyer import notification
-        notification.notify(
-            title=title,
-            message=message[:256],
-            app_name="LinkedinAutomation",
-            timeout=10,
-        )
-    except Exception:
-        pass  # Desktop notification is best-effort
+    # Skip desktop notifications on headless Linux (plyer D-Bus timeout)
+    if sys.platform != "linux" or os.environ.get("DISPLAY"):
+        try:
+            from plyer import notification  # pyre-ignore[21]
+            notification.notify(  # pyre-ignore[16]
+                title=title,
+                message=message[:256],  # pyre-ignore[6]
+                app_name="LinkedinAutomation",
+                timeout=10,
+            )
+        except Exception:
+            pass  # Desktop notification is best-effort
 
 
 def confirm(prompt: str = "Press ENTER to continue...") -> None:
