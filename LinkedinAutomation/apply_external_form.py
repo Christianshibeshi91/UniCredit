@@ -12,6 +12,7 @@ other ATS platforms by:
 """
 
 import asyncio
+import json
 import os
 import re
 
@@ -36,9 +37,14 @@ from LinkedinAutomation.apply_easy_apply import (  # pyre-ignore[21]
     _check_daily_cap,
     _load_run_state,
     _save_run_state,
+    _load_profile,
 )
 from LinkedinAutomation.apply_external import extract_url  # pyre-ignore[21]
 from LinkedinAutomation.apply_security import sanitize_url, safe_resume_path_with_fallback  # pyre-ignore[21]
+from LinkedinAutomation.ollama_client import (  # pyre-ignore[21]
+    generate_json as ollama_json,
+    is_available as ollama_available,
+)
 
 BASE_DIR = os.path.dirname(os.path.dirname(__file__))
 SCREENSHOTS_DIR = os.path.join(BASE_DIR, ".tmp", "screenshots")
@@ -148,6 +154,216 @@ async def _should_skip_field(element, label_text):
     return False
 
 
+async def _collect_page_fields(page):
+    """Scan all visible form fields on the current page into a manifest.
+
+    Returns list of dicts with label, field_type, options, element, tag, input_type.
+    """
+    selectors = [
+        "input:not([type='hidden']):not([type='submit']):not([type='button'])",
+        "textarea",
+        "select",
+    ]
+    manifest = []
+
+    for selector in selectors:
+        elements = await page.query_selector_all(selector)
+        for element in elements:
+            try:
+                label_text = await _get_field_label(element, page)
+                if await _should_skip_field(element, label_text):
+                    continue
+
+                tag = await element.evaluate("el => el.tagName.toLowerCase()")
+                input_type = ""
+                if tag == "input":
+                    input_type = (await element.get_attribute("type") or "text").lower()
+
+                # Determine field type and extract options
+                field_type = "text"
+                options = []
+
+                if tag == "select":
+                    field_type = "select"
+                    opt_els = await element.query_selector_all("option")
+                    for opt_el in opt_els:
+                        t = (await opt_el.text_content() or "").strip()
+                        if t and t.lower() not in (
+                            "select", "select an option", "-- select --",
+                            "choose", "please select", "",
+                        ):
+                            options.append(t)
+                elif input_type == "radio":
+                    field_type = "radio"
+                elif input_type == "checkbox":
+                    field_type = "checkbox"
+                    options = ["Yes", "No"]
+                elif tag == "textarea":
+                    field_type = "textarea"
+
+                manifest.append({
+                    "label": label_text,
+                    "field_type": field_type,
+                    "options": options,
+                    "element": element,
+                    "tag": tag,
+                    "input_type": input_type,
+                })
+            except Exception:
+                continue
+
+    return manifest
+
+
+def _build_form_fill_prompt(fields, intake, profile, job_title):
+    """Build the Ollama prompt for batch-matching form fields to candidate answers."""
+    # Merge candidate data from profile.json and intake_form.json
+    name = profile.get("name", "")
+    parts = name.split() if name else []
+    location = profile.get("location", "")
+    loc_parts = location.split(",") if location else []
+
+    candidate_data = {
+        "name": name,
+        "first_name": parts[0] if parts else "",
+        "last_name": " ".join(parts[1:]) if len(parts) > 1 else "",  # pyre-ignore[29]
+        "email": profile.get("email", ""),
+        "phone": profile.get("phone", intake.get("contact", "")),
+        "location": location,
+        "city": loc_parts[0].strip() if loc_parts else "",
+        "state": loc_parts[-1].strip().split()[0] if len(loc_parts) > 1 else "",
+        "zip_code": location.split()[-1] if location and location.split()[-1].isdigit() else "",
+        "country": "United States",
+        "linkedin_url": profile.get("linkedin", ""),
+        "title": profile.get("title", ""),
+        "years_of_experience": profile.get("years_of_experience", intake.get("experience", "")),
+        "work_authorization": intake.get("work_authorization", ""),
+        "education": profile.get("education", intake.get("education", "")),
+        "salary_range": f"${profile.get('salary_target_min', 0):,}-${profile.get('salary_target_max', 0):,}",
+        "willing_to_relocate": "Yes",
+        "remote_ok": profile.get("remote_ok", True),
+        "certifications": ", ".join(profile.get("certifications", [])),
+        "core_skills": ", ".join(profile.get("core_skills", [])[:10]),
+        "summary": profile.get("summary", ""),
+    }
+
+    # Screening data from intake_form
+    screening = intake.get("screening", {})
+    if isinstance(screening, dict):
+        candidate_data.update({
+            "security_clearance": screening.get("security_clearance", ""),
+            "willing_to_travel": screening.get("willing_to_travel", ""),
+            "travel_percentage": screening.get("travel_percentage", ""),
+            "veteran_status": screening.get("veteran_status", ""),
+            "disability_status": screening.get("disability_status", ""),
+            "gender": screening.get("gender", ""),
+            "race_ethnicity": screening.get("race_ethnicity", ""),
+        })
+
+    custom_answers = intake.get("custom_answers", {})
+
+    # Build field manifest for prompt (strip element handles)
+    fields_for_prompt = []
+    for i, f in enumerate(fields):
+        desc = {"id": i, "label": f["label"], "type": f["field_type"]}
+        if f["options"]:
+            desc["options"] = f["options"]
+        fields_for_prompt.append(desc)
+
+    # Detect qwen model for /no_think prefix
+    ollama_model = os.getenv("OLLAMA_MODEL", "qwen3:8b").lower()
+    think_prefix = "/no_think\n" if "qwen" in ollama_model else ""
+
+    prompt = f"""{think_prefix}You are a job application form filler. Given candidate data and form fields, return the correct answer for each field.
+
+## Candidate Data
+{json.dumps(candidate_data, indent=2)}
+
+## Custom Q&A
+{json.dumps(custom_answers, indent=2)}
+
+## Job
+{job_title}
+
+## Form Fields
+{json.dumps(fields_for_prompt, indent=2)}
+
+## Rules
+1. Return ONLY a JSON object mapping each field's "label" to the answer string.
+2. For "select" or "radio" fields, the answer MUST be one of the provided "options" exactly.
+3. For "checkbox" fields, answer "Yes" or "No".
+4. For text fields asking about experience years, return just the number.
+5. For open-ended questions, use Custom Q&A if a match exists, otherwise write a brief professional answer using candidate data.
+6. If you cannot determine an answer, omit that field entirely.
+7. NEVER invent data not present in the candidate data above.
+8. Output ONLY valid JSON, no other text.
+"""
+    return prompt
+
+
+def _ollama_match_fields(fields, intake, profile, job_title):
+    """Use Ollama to batch-match form fields to candidate answers.
+
+    Returns dict mapping field label -> answer string, or None if unavailable.
+    """
+    if not ollama_available():
+        return None
+
+    prompt = _build_form_fill_prompt(fields, intake, profile, job_title)
+    result = ollama_json(prompt, max_tokens=2000)
+
+    if not result or not isinstance(result, dict):
+        alert("Ollama Form Fill", "No valid response from Ollama", "warning")
+        return None
+
+    # Build lookup from label -> field info for option validation
+    field_lookup = {}
+    for f in fields:
+        field_lookup[f["label"]] = f
+        field_lookup[f["label"].lower()] = f
+
+    validated = {}
+    for label, answer in result.items():
+        if not isinstance(answer, str):
+            answer = str(answer)
+        answer = answer.strip()
+        if not answer:
+            continue
+
+        # Find matching field info (case-insensitive)
+        field_info = field_lookup.get(label) or field_lookup.get(label.lower())
+        if not field_info:
+            # Try substring match as last resort
+            for fl, fi in field_lookup.items():
+                if isinstance(fl, str) and fl.lower() == label.lower():  # pyre-ignore[16]
+                    field_info = fi
+                    label = fl
+                    break
+
+        # Validate select/radio answers against options
+        if field_info and field_info["options"]:
+            options_lower = [o.lower() for o in field_info["options"]]
+            if answer.lower() not in options_lower:
+                matched_option = None
+                for opt in field_info["options"]:
+                    if answer.lower() in opt.lower() or opt.lower() in answer.lower():
+                        matched_option = opt
+                        break
+                if matched_option:
+                    answer = matched_option
+                else:
+                    alert("Ollama Form Fill",
+                          f"Skipping '{label}': '{answer}' not in options", "warning")
+                    continue
+
+        # Use the original label casing from the manifest
+        original_label = field_info["label"] if field_info else label
+        validated[original_label] = answer
+
+    alert("Ollama Form Fill", f"Matched {len(validated)}/{len(fields)} fields")
+    return validated
+
+
 async def _ask_admin_external(label, page, job_title, field_type, options, ask_callback):
     """Ask admin via Telegram for an unknown field answer on external site."""
     os.makedirs(SCREENSHOTS_DIR, exist_ok=True)
@@ -185,122 +401,112 @@ async def _ask_admin_external(label, page, job_title, field_type, options, ask_c
 async def _fill_page_fields(page, intake, resume_path, ask_callback, job_title):
     """Scan and fill all visible form fields on the current page.
 
-    Returns (filled_count, unfilled_count, total_count).
+    Uses a fallback chain: Ollama -> regex patterns -> learned answers -> Telegram Q&A.
+    Returns (filled_count, unfilled_count, asked_count).
     """
     filled = 0
     unfilled = 0
     asked = 0
 
-    # Find all interactive form elements
-    selectors = [
-        "input:not([type='hidden']):not([type='submit']):not([type='button'])",
-        "textarea",
-        "select",
-    ]
+    # Step 1: Collect all fields on the page
+    manifest = await _collect_page_fields(page)  # pyre-ignore[29]
 
-    for selector in selectors:
-        elements = await page.query_selector_all(selector)
+    # Step 2: Batch-match via Ollama (if available and enabled)
+    use_ollama = os.getenv("OLLAMA_FORM_FILL", "true").lower() == "true"
+    ollama_answers = {}
+    if use_ollama:
+        profile = _load_profile()
+        ollama_answers = _ollama_match_fields(manifest, intake, profile, job_title) or {}
 
-        for element in elements:
-            try:
-                label_text = await _get_field_label(element, page)
+    # Step 3: Fill each field using fallback chain
+    for field_info in manifest:
+        element = field_info["element"]
+        label_text = field_info["label"]
+        tag = field_info["tag"]
+        input_type = field_info["input_type"]
 
-                if await _should_skip_field(element, label_text):
-                    continue
+        try:
+            # Handle file upload (resume)
+            if input_type == "file":
+                if resume_path and os.path.exists(resume_path):
+                    try:
+                        await element.set_input_files(resume_path)
+                        await asyncio.sleep(get_human_delay("click"))
+                        alert("External Fill", f"  Uploaded resume: {label_text}")
+                        filled += 1
+                    except Exception as e:
+                        alert("External Fill", f"  Resume upload failed: {e}", "warning")
+                        unfilled += 1
+                continue
 
-                tag = await element.evaluate("el => el.tagName.toLowerCase()")
-                input_type = ""
-                if tag == "input":
-                    input_type = (await element.get_attribute("type") or "text").lower()
+            # Fallback 1: Ollama answer
+            answer = ollama_answers.get(label_text, "")
 
-                # Handle file upload (resume)
-                if input_type == "file":
-                    if resume_path and os.path.exists(resume_path):
-                        try:
-                            await element.set_input_files(resume_path)
-                            await asyncio.sleep(get_human_delay("click"))
-                            alert("External Fill", f"  Uploaded resume: {label_text}")
-                            filled += 1
-                        except Exception as e:
-                            alert("External Fill", f"  Resume upload failed: {e}", "warning")
-                            unfilled += 1
-                    continue
-
-                # Try to match the field to a known answer
+            # Fallback 2: Regex patterns + custom + learned answers
+            if not answer:
                 answer = _match_field_to_answer(label_text, intake)
 
-                # If no match and we can ask admin, do so
-                if not answer and ask_callback:
-                    field_type = "text"
-                    options = []
+            # Fallback 3: Ask admin via Telegram
+            if not answer and ask_callback:
+                admin_answer = await _ask_admin_external(
+                    label_text, page, job_title,
+                    field_info["field_type"], field_info["options"],
+                    ask_callback,
+                )
+                if admin_answer:
+                    answer = admin_answer
+                    _save_learned_answer(label_text, answer)
+                    alert("Learned", f"Saved answer for '{label_text}': {answer}")
+                    asked += 1
 
-                    if tag == "select":
-                        field_type = "select"
-                        opt_els = await element.query_selector_all("option")
-                        for opt_el in opt_els:
-                            t = (await opt_el.text_content() or "").strip()
-                            if t and t.lower() not in ("select", "select an option", "-- select --", "choose", "please select", ""):
-                                options.append(t)
-                    elif input_type == "radio":
-                        field_type = "radio"
-                    elif input_type == "checkbox":
-                        field_type = "checkbox"
-                        options = ["Yes", "No"]
+            if not answer:
+                unfilled += 1
+                alert("External Fill", f"  Unfilled: {label_text}", "warning")
+                continue
 
-                    admin_answer = await _ask_admin_external(
-                        label_text, page, job_title, field_type, options, ask_callback
-                    )
-                    if admin_answer:
-                        answer = admin_answer
-                        _save_learned_answer(label_text, answer)
-                        alert("Learned", f"Saved answer for '{label_text}': {answer}")
-                        asked += 1
+            # Save Ollama-sourced answers to learned_answers for future cache
+            if label_text in ollama_answers and answer == ollama_answers[label_text]:
+                _save_learned_answer(label_text, answer)
 
-                if not answer:
+            # Fill the field based on its type
+            if tag == "select":
+                success = await _handle_select(page, element, answer)
+                if success:
+                    filled += 1
+                    alert("External Fill", f"  Filled select: {label_text}")
+                else:
                     unfilled += 1
-                    alert("External Fill", f"  Unfilled: {label_text}", "warning")
-                    continue
-
-                # Fill the field based on its type
-                if tag == "select":
-                    success = await _handle_select(page, element, answer)
+            elif input_type in ("checkbox",):
+                answer_lower = answer.lower()  # pyre-ignore[16]
+                if answer_lower in ("yes", "true", "agree", "i agree"):
+                    is_checked = await element.is_checked()
+                    if not is_checked:
+                        await element.click()
+                        await asyncio.sleep(get_human_delay("click"))
+                filled += 1
+                alert("External Fill", f"  Filled checkbox: {label_text}")
+            elif input_type == "radio":
+                parent = await element.evaluate_handle("el => el.closest('fieldset, div, li')")
+                if parent:
+                    success = await _handle_radio_buttons(page, parent.as_element(), answer)
                     if success:
                         filled += 1
-                        alert("External Fill", f"  Filled select: {label_text}")
-                    else:
-                        unfilled += 1
-                elif input_type in ("checkbox",):
-                    answer_lower = answer.lower()  # pyre-ignore[16]
-                    if answer_lower in ("yes", "true", "agree", "i agree"):
-                        is_checked = await element.is_checked()
-                        if not is_checked:
-                            await element.click()
-                            await asyncio.sleep(get_human_delay("click"))
-                    filled += 1
-                    alert("External Fill", f"  Filled checkbox: {label_text}")
-                elif input_type == "radio":
-                    # For radios, find the parent fieldset and use radio handler
-                    parent = await element.evaluate_handle("el => el.closest('fieldset, div, li')")
-                    if parent:
-                        success = await _handle_radio_buttons(page, parent.as_element(), answer)
-                        if success:
-                            filled += 1
-                            alert("External Fill", f"  Filled radio: {label_text}")
-                        else:
-                            unfilled += 1
+                        alert("External Fill", f"  Filled radio: {label_text}")
                     else:
                         unfilled += 1
                 else:
-                    # Text input or textarea
-                    await _fill_text_field(page, element, answer, intake)
-                    filled += 1
-                    alert("External Fill", f"  Filled: {label_text}")
+                    unfilled += 1
+            else:
+                # Text input or textarea
+                await _fill_text_field(page, element, answer, intake)
+                filled += 1
+                alert("External Fill", f"  Filled: {label_text}")
 
-                await asyncio.sleep(get_human_delay("between_fields"))
+            await asyncio.sleep(get_human_delay("between_fields"))
 
-            except Exception as e:
-                alert("External Fill", f"  Error on field: {e}", "warning")
-                unfilled += 1
+        except Exception as e:
+            alert("External Fill", f"  Error on field: {e}", "warning")
+            unfilled += 1
 
     return filled, unfilled, asked
 

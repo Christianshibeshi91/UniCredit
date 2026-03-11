@@ -74,12 +74,12 @@ def generate(prompt, model=None, max_tokens=2000):
         return None
 
 
-def generate_json(prompt, model=None):
+def generate_json(prompt, model=None, max_tokens=1500):
     """Send a prompt to Ollama and parse JSON from the response.
 
     Returns None if Ollama is unavailable or response isn't valid JSON.
     """
-    raw = generate(prompt, model=model, max_tokens=1500)
+    raw = generate(prompt, model=model, max_tokens=max_tokens)
     if not raw:
         return None
 
