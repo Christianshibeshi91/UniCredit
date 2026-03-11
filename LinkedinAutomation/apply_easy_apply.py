@@ -732,6 +732,22 @@ def apply(job, resume_path, cover_letter, max_per_day=15, ask_callback=None):
     if not _check_daily_cap(max_per_day):
         alert("Daily Cap", "Maximum daily applications reached.", "warning")
         return False
+
+    # Handle case where we're already inside an event loop (e.g. Telegram bot)
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+
+    if loop and loop.is_running():
+        import concurrent.futures
+
+        def _run_apply():  # pyre-ignore[53]
+            return asyncio.run(_apply_async(job, resume_path, cover_letter, ask_callback=ask_callback))
+
+        with concurrent.futures.ThreadPoolExecutor() as pool:
+            return pool.submit(_run_apply).result(timeout=300)  # pyre-ignore[6]
+
     return asyncio.run(_apply_async(job, resume_path, cover_letter, ask_callback=ask_callback))
 
 

@@ -92,6 +92,8 @@ def _extract_requests(job_url):
     # Authenticated attempt
     if li_at:
         try:
+            session = requests.Session()
+            session.max_redirects = 10
             cookies = {"li_at": li_at, "JSESSIONID": "ajax:0"}
             headers = {
                 "User-Agent": _UA,
@@ -99,7 +101,7 @@ def _extract_requests(job_url):
                 "Accept-Language": "en-US,en;q=0.9",
                 "Csrf-Token": "ajax:0",
             }
-            r = requests.get(job_url, headers=headers, cookies=cookies, timeout=15)
+            r = session.get(job_url, headers=headers, cookies=cookies, timeout=15)
             if r.status_code == 200:
                 url = _extract_from_html(r.text)
                 if url:
@@ -238,7 +240,22 @@ def extract_url(job):
     # --- Slow path: stealth browser ---
     alert("External Apply", "Requests failed, trying stealth browser...")
     try:
-        external_url = asyncio.run(_extract_browser(job_url))
+        # Handle case where we're already inside an event loop (e.g. Telegram bot)
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+
+        if loop and loop.is_running():
+            import concurrent.futures
+
+            def _run_browser(url: str) -> str:
+                return asyncio.run(_extract_browser(url))  # pyre-ignore[7]
+
+            with concurrent.futures.ThreadPoolExecutor() as pool:
+                external_url = pool.submit(_run_browser, job_url).result(timeout=60)  # pyre-ignore[6]
+        else:
+            external_url = asyncio.run(_extract_browser(job_url))
     except Exception as e:
         alert("External Apply", f"Browser fallback failed: {e}", "warning")
         external_url = ""
