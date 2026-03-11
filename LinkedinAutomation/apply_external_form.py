@@ -15,6 +15,7 @@ import asyncio
 import json
 import os
 import re
+import time
 
 from playwright.async_api import async_playwright  # pyre-ignore[21]
 
@@ -60,6 +61,11 @@ _NEXT_TEXTS = [
 ]
 _SKIP_TEXTS = [
     "skip", "skip this step", "not now", "maybe later",
+]
+_LOGIN_TEXTS = [
+    "create account", "create my account", "sign up", "register",
+    "sign in", "log in", "login", "sign in with email",
+    "create a new account", "get started",
 ]
 
 # Fields to skip (ATS boilerplate)
@@ -215,6 +221,359 @@ async def _collect_page_fields(page):
     return manifest
 
 
+def _get_ats_credentials():
+    """Return ATS portal credentials from environment.
+
+    Credentials are used for Workday, Greenhouse, etc. account
+    creation and login pages. Fail-secure: returns empty strings
+    if not configured (fields will be left unfilled).
+    """
+    email = os.getenv("ATS_EMAIL", "")
+    password = os.getenv("ATS_PASSWORD", "")
+    if not email or not password:
+        alert("ATS Credentials", "ATS_EMAIL/ATS_PASSWORD not set in .env", "warning")
+    return email, password
+
+
+def _match_ats_login_fields(manifest):
+    """Pre-match login/signup fields using ATS credentials (not Ollama).
+
+    Handles email, password, and verify-password fields on ATS portals.
+    Returns dict of label -> answer for matched fields.
+    Skips honeypot/robot-trap fields.
+    """
+    ats_email, ats_password = _get_ats_credentials()
+    if not ats_email:
+        return {}
+
+    matched = {}
+    for field in manifest:
+        label_lower = field["label"].lower()
+        input_type = field["input_type"]
+
+        # Skip honeypot / robot trap fields
+        if "robot" in label_lower or "bot" in label_lower or "honey" in label_lower:
+            continue
+
+        # Email fields on login/signup pages
+        if input_type == "email" or re.search(r"e[\-\s]?mail", label_lower):
+            matched[field["label"]] = ats_email
+
+        # Password fields (password, verify, confirm)
+        elif input_type == "password" or re.search(
+            r"password|passcode|pass\s*word", label_lower
+        ):
+            matched[field["label"]] = ats_password
+
+    return matched
+
+
+# ---------------------------------------------------------------------------
+# Email verification for ATS account creation (Gmail API / OAuth2)
+# ---------------------------------------------------------------------------
+
+_ATS_SENDER_DOMAINS = [
+    "workday.com", "myworkdayjobs.com", "workday.net",
+    "greenhouse.io", "greenhouse-mail.io",
+    "lever.co", "lever-mail.com",
+    "icims.com",
+    "taleo.net", "oracle.com",
+    "smartrecruiters.com",
+    "jobvite.com",
+    "successfactors.com", "sap.com",
+    "brassring.com", "kenexa.com",
+    "ultipro.com", "ukg.com",
+    "dayforce.com", "ceridian.com",
+    "ashbyhq.com",
+    "recruitee.com",
+    "bamboohr.com",
+    "jazz.co", "resumator.com",
+    "applytojob.com",
+    "noreply",
+]
+
+_VERIFY_SUBJECT_KEYWORDS = [
+    "verify", "confirm", "activate", "validation", "validate",
+    "email verification", "account activation", "complete your",
+    "action required", "one more step",
+]
+
+_VERIFY_LINK_KEYWORDS = [
+    "verify", "confirm", "activate", "validate", "token",
+    "auth", "registration", "complete",
+]
+
+_GMAIL_TOKEN_PATH = os.path.join(BASE_DIR, "token_gmail.json")
+_GMAIL_CREDS_PATH = os.path.join(BASE_DIR, "credentials.json")
+_GMAIL_SCOPES = ["https://www.googleapis.com/auth/gmail.modify"]
+
+
+def _get_gmail_service():
+    """Build Gmail API service using OAuth2 (same credentials.json as Sheets).
+
+    Uses a separate token file (token_gmail.json) to avoid scope conflicts
+    with the existing Sheets/Drive token. First run will open a browser
+    for OAuth consent.
+    """
+    try:
+        from google.oauth2.credentials import Credentials  # pyre-ignore[21]
+        from google_auth_oauthlib.flow import InstalledAppFlow  # pyre-ignore[21]
+        from google.auth.transport.requests import Request  # pyre-ignore[21]
+        from googleapiclient.discovery import build  # pyre-ignore[21]
+    except ImportError:
+        alert("Gmail API", "google-api-python-client not installed", "warning")
+        return None
+
+    if not os.path.exists(_GMAIL_CREDS_PATH):
+        alert("Gmail API", "credentials.json not found — cannot check emails", "warning")
+        return None
+
+    creds = None
+    if os.path.exists(_GMAIL_TOKEN_PATH):
+        try:
+            creds = Credentials.from_authorized_user_file(_GMAIL_TOKEN_PATH, _GMAIL_SCOPES)
+        except Exception:
+            pass
+
+    if not creds or not creds.valid:
+        if creds and creds.expired and creds.refresh_token:
+            creds.refresh(Request())
+        else:
+            try:
+                flow = InstalledAppFlow.from_client_secrets_file(
+                    _GMAIL_CREDS_PATH, _GMAIL_SCOPES,
+                )
+                creds = flow.run_local_server(port=0)
+            except Exception as e:
+                alert("Gmail API", f"OAuth flow failed: {e}", "error")
+                return None
+        with open(_GMAIL_TOKEN_PATH, "w") as f:
+            f.write(creds.to_json())
+
+    return build("gmail", "v1", credentials=creds)
+
+
+def _gmail_get_body(payload):
+    """Extract text and HTML body from a Gmail API message payload."""
+    import base64
+
+    text_body = ""
+    html_body = ""
+
+    def _extract(part):
+        nonlocal text_body, html_body
+        mime = part.get("mimeType", "")
+        data = part.get("body", {}).get("data", "")
+        if data:
+            decoded = base64.urlsafe_b64decode(data).decode("utf-8", errors="replace")
+            if mime == "text/plain":
+                text_body += decoded
+            elif mime == "text/html":
+                html_body += decoded
+        for sub in part.get("parts", []):
+            _extract(sub)
+
+    _extract(payload)
+    return text_body, html_body
+
+
+def _extract_verification_link(text_body, html_body):
+    """Extract a verification/confirmation link from email body."""
+    links = []
+    if html_body:
+        links = re.findall(r'href=["\']([^"\']{10,})["\']', html_body)
+    if text_body:
+        links.extend(re.findall(r'https?://[^\s<>"\')\]]{10,}', text_body))
+
+    # Prefer links with verification keywords
+    for link in links:
+        link_lower = link.lower()
+        if any(kw in link_lower for kw in _VERIFY_LINK_KEYWORDS):
+            if link.startswith(("http://", "https://")):
+                return link
+
+    # Fallback: long URLs with token parameters (common in verification emails)
+    for link in links:
+        if ("token=" in link.lower() or "code=" in link.lower() or len(link) > 120):
+            if link.startswith(("http://", "https://")):
+                return link
+
+    return None
+
+
+def _extract_verification_code(text_body, html_body):
+    """Extract a verification code (4-8 digits) from email body."""
+    combined = text_body + " " + html_body
+    code_patterns = [
+        r'(?:code|pin|otp|verification).{0,20}?(\d{4,8})',
+        r'(\d{4,8})\s*(?:is your|verification|code)',
+        r'<strong>(\d{4,8})</strong>',
+        r'<b>(\d{4,8})</b>',
+    ]
+    for pattern in code_patterns:
+        match = re.search(pattern, combined, re.IGNORECASE)
+        if match:
+            return match.group(1)
+    return None
+
+
+async def _poll_verification_email(ats_email, timeout=90, poll_interval=10):
+    """Poll Gmail API for a verification email from ATS platforms.
+
+    Returns (link, code) tuple — one or both may be None.
+    Uses OAuth2 via credentials.json (same as Google Sheets).
+    """
+    service = _get_gmail_service()
+    if not service:
+        return None, None
+
+    start_time = time.time()
+
+    while (time.time() - start_time) < timeout:
+        try:
+            # Search for recent unread emails (last 10 minutes)
+            results = service.users().messages().list(
+                userId="me", q="is:unread newer_than:10m", maxResults=10,
+            ).execute()
+
+            for msg_meta in results.get("messages", []):
+                msg = service.users().messages().get(
+                    userId="me", id=msg_meta["id"], format="full",
+                ).execute()
+
+                headers = {
+                    h["name"].lower(): h["value"]
+                    for h in msg.get("payload", {}).get("headers", [])
+                }
+                from_addr = headers.get("from", "").lower()
+                subject = headers.get("subject", "").lower()
+
+                from_ats = any(d in from_addr for d in _ATS_SENDER_DOMAINS)
+                subject_verify = any(
+                    kw in subject for kw in _VERIFY_SUBJECT_KEYWORDS
+                )
+
+                if not (from_ats or subject_verify):
+                    continue
+
+                alert("Email Verify", f"Found verification email: {subject[:60]}")
+
+                text_body, html_body = _gmail_get_body(msg.get("payload", {}))
+                link = _extract_verification_link(text_body, html_body)
+                code = _extract_verification_code(text_body, html_body)
+
+                if link or code:
+                    # Mark as read
+                    service.users().messages().modify(
+                        userId="me", id=msg_meta["id"],
+                        body={"removeLabelIds": ["UNREAD"]},
+                    ).execute()
+                    return link, code
+
+        except Exception as e:
+            alert("Email Verify", f"Gmail API error: {e}", "warning")
+
+        alert("Email Verify",
+              f"No verification email yet, retrying in {poll_interval}s...")
+        await asyncio.sleep(poll_interval)
+
+    alert("Email Verify", f"No verification email found after {timeout}s", "warning")
+    return None, None
+
+
+async def _handle_email_verification(page, ats_email):
+    """Detect and complete email verification after ATS account creation.
+
+    Checks if the current page requests email verification, polls Gmail
+    for the verification email, and either opens the link or enters the code.
+    Returns True if verification was handled.
+    """
+    page_text = (await page.text_content("body") or "").lower()
+    needs_verify = any(phrase in page_text for phrase in [
+        "verify your email", "check your email", "verification email",
+        "we sent", "confirm your email", "we've sent", "check your inbox",
+        "email has been sent", "verify your account", "confirmation email",
+        "verify email", "verify account", "verification link",
+    ])
+
+    if not needs_verify:
+        return False
+
+    alert("Email Verify", "Email verification required — checking Gmail inbox...")
+
+    link, code = await _poll_verification_email(ats_email)  # pyre-ignore[29]
+
+    if link:
+        alert("Email Verify", "Found verification link, opening in new tab...")
+        # Open in a new tab to preserve the application page
+        verify_page = await page.context.new_page()
+        try:
+            await verify_page.goto(link, wait_until="domcontentloaded", timeout=30000)
+            await asyncio.sleep(5)
+
+            os.makedirs(SCREENSHOTS_DIR, exist_ok=True)
+            await verify_page.screenshot(
+                path=os.path.join(SCREENSHOTS_DIR, "email_verified.png"),
+                full_page=False,
+            )
+            alert("Email Verify", "Verification link opened successfully!")
+        except Exception as e:
+            alert("Email Verify", f"Error opening verification link: {e}", "warning")
+        finally:
+            await verify_page.close()
+
+        # Reload the original page so it picks up the verified state
+        await page.reload(wait_until="domcontentloaded")
+        await asyncio.sleep(3)
+        return True
+
+    elif code:
+        alert("Email Verify", f"Found verification code: {code}")
+        # Find code input field on the page
+        code_inputs = await page.query_selector_all(
+            "input[type='text'], input[type='number'], input[type='tel'], input:not([type])"
+        )
+        for inp in code_inputs:
+            try:
+                if not await inp.is_visible():
+                    continue
+                label = await _get_field_label(inp, page)  # pyre-ignore[29]
+                if any(kw in label.lower() for kw in [
+                    "code", "verify", "otp", "pin", "confirmation",
+                ]):
+                    await inp.fill(code)
+                    await asyncio.sleep(1)
+                    await _click_page_button(
+                        page, ["verify", "confirm", "submit", "continue"],
+                    )
+                    await asyncio.sleep(3)
+                    alert("Email Verify", "Verification code entered!")
+                    return True
+            except Exception:
+                continue
+
+        # Fallback: try the first empty visible input
+        for inp in code_inputs:
+            try:
+                if not await inp.is_visible():
+                    continue
+                val = await inp.input_value()
+                if not val:
+                    await inp.fill(code)
+                    await asyncio.sleep(1)
+                    await _click_page_button(
+                        page, ["verify", "confirm", "submit", "continue"],
+                    )
+                    await asyncio.sleep(3)
+                    alert("Email Verify", "Verification code entered!")
+                    return True
+            except Exception:
+                continue
+
+    alert("Email Verify", "Could not complete email verification", "warning")
+    return False
+
+
 def _build_form_fill_prompt(fields, intake, profile, job_title):
     """Build the Ollama prompt for batch-matching form fields to candidate answers."""
     # Merge candidate data from profile.json and intake_form.json
@@ -262,9 +621,12 @@ def _build_form_fill_prompt(fields, intake, profile, job_title):
 
     custom_answers = intake.get("custom_answers", {})
 
-    # Build field manifest for prompt (strip element handles)
+    # Build field manifest for prompt (strip element handles and login fields)
     fields_for_prompt = []
     for i, f in enumerate(fields):
+        # Skip password/login fields — handled by ATS credentials, not LLM
+        if f["input_type"] == "password" or "robot" in f["label"].lower():
+            continue
         desc = {"id": i, "label": f["label"], "type": f["field_type"]}
         if f["options"]:
             desc["options"] = f["options"]
@@ -411,7 +773,10 @@ async def _fill_page_fields(page, intake, resume_path, ask_callback, job_title):
     # Step 1: Collect all fields on the page
     manifest = await _collect_page_fields(page)  # pyre-ignore[29]
 
-    # Step 2: Batch-match via Ollama (if available and enabled)
+    # Step 2a: Pre-match ATS login/signup fields (email + password from env)
+    ats_answers = _match_ats_login_fields(manifest)
+
+    # Step 2b: Batch-match remaining fields via Ollama (if available and enabled)
     use_ollama = os.getenv("OLLAMA_FORM_FILL", "true").lower() == "true"
     ollama_answers = {}
     if use_ollama:
@@ -439,8 +804,12 @@ async def _fill_page_fields(page, intake, resume_path, ask_callback, job_title):
                         unfilled += 1
                 continue
 
+            # Fallback 0: ATS credentials (email/password fields)
+            answer = ats_answers.get(label_text, "")
+
             # Fallback 1: Ollama answer
-            answer = ollama_answers.get(label_text, "")
+            if not answer:
+                answer = ollama_answers.get(label_text, "")
 
             # Fallback 2: Regex patterns + custom + learned answers
             if not answer:
@@ -603,6 +972,13 @@ async def _apply_external_async(job, resume_path, ask_callback=None):
                 alert("External Apply", f"Page {page_num} of application for {title}...")
                 await asyncio.sleep(get_human_delay("between_fields"))
 
+                # Check for email verification prompt on current page
+                _ats_email = os.getenv("ATS_EMAIL", "")
+                if _ats_email and os.path.exists(_GMAIL_CREDS_PATH):
+                    if await _handle_email_verification(page, _ats_email):
+                        alert("External Apply", "Email verified, re-processing page...")
+                        continue
+
                 # Fill all fields on current page
                 filled, unfilled, asked = await _fill_page_fields(  # pyre-ignore[29]
                     page, intake, resume_path, ask_callback, job_title,
@@ -613,7 +989,15 @@ async def _apply_external_async(job, resume_path, ask_callback=None):
 
                 alert("External Apply", f"  Page {page_num}: {filled} filled, {unfilled} unfilled, {asked} asked")
 
-                # Check for submit button first
+                # Try login/signup buttons first (account creation pages)
+                if await _click_page_button(page, _LOGIN_TEXTS):
+                    alert("External Apply", "Clicked login/signup button...")
+                    await asyncio.sleep(get_human_delay("page_load"))
+                    # Wait extra for Workday-style JS-heavy page transitions
+                    await asyncio.sleep(3)
+                    continue
+
+                # Check for submit button
                 if await _click_page_button(page, _SUBMIT_TEXTS):
                     await asyncio.sleep(get_human_delay("page_load"))
 

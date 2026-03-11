@@ -3,6 +3,7 @@
 credentials.json
 token.json
 token.json.bak*
+token_gmail.json
 linkedin_auth.json
 candidate/learned_answers.json
 candidate/intake_form.json
