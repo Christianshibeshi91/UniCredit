@@ -10,7 +10,6 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.79.0",
     "@tanstack/react-virtual": "^3.13.23",
     "clsx": "^2.1.1",
     "firebase": "^12.10.0",

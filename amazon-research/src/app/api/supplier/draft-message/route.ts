@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { getMockOutreach } from "@/lib/mock-suggestions";
+import { getMockOutreach, getMockSupplierSearch, getMockCostEstimate } from "@/lib/mock-suggestions";
+import { draftOutreach } from "@/lib/analysis/supplierAdvisor";
 
 export const runtime = "nodejs";
 
@@ -25,8 +26,8 @@ export async function POST(request: Request) {
       );
     }
 
-    // If no API key, return mock data
-    if (!process.env.ANTHROPIC_API_KEY) {
+    // If no LLM configured, return mock data
+    if (!process.env.OLLAMA_BASE_URL) {
       const outreach = getMockOutreach(suggestionId);
       if (!outreach) {
         return NextResponse.json(
@@ -41,18 +42,32 @@ export async function POST(request: Request) {
       });
     }
 
-    // In production, would call draftOutreach() with supplier and spec data
-    const outreach = getMockOutreach(suggestionId);
-    if (!outreach) {
+    // Get supplier search data for this suggestion
+    const search = getMockSupplierSearch(suggestionId);
+    if (!search) {
       return NextResponse.json(
-        { error: "Outreach message not found" },
+        { error: "Supplier search not found" },
         { status: 404 }
       );
     }
+
+    // Find the specific supplier to draft outreach for
+    const supplier = search.suppliers.find((s) => s.id === supplierId);
+    if (!supplier) {
+      return NextResponse.json(
+        { error: "Supplier not found" },
+        { status: 404 }
+      );
+    }
+
+    // Include cost estimate for richer context if available
+    const costEstimate = getMockCostEstimate(suggestionId) || undefined;
+
+    const outreach = await draftOutreach(supplier, search.productSpec, costEstimate);
     return NextResponse.json({
       outreach,
       supplierId,
-      source: "mock",
+      source: "ollama",
     });
   } catch (error) {
     console.error("[API /supplier/draft-message] Error:", error);

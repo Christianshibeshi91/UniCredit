@@ -51,11 +51,10 @@ export function enrichProducts(products: Product[]): EnrichedProduct[] {
   });
 }
 
+/**
+ * Synchronous fallback for client-side rendering.
+ * For real Firestore-backed status, use GET /api/live-data/status instead.
+ */
 export function getLiveDataStatus(): LiveDataStatus {
-  if (!isEnabled()) {
-    return getMockLiveDataStatus();
-  }
-
-  // Real implementation would aggregate sync statuses from a persistent store
   return getMockLiveDataStatus();
 }

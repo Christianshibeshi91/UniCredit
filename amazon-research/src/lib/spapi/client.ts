@@ -2,8 +2,7 @@ import type { SPAPICatalogItem, SPAPIPricing, SPAPIReviewData, SPAPIBSRData, SPA
 import { tokenManager } from "./tokenManager";
 import { rateLimiter } from "./rateLimiter";
 import { spapiCache } from "./cache";
-
-const SP_API_BASE = "https://sellingpartnerapi-na.amazon.com";
+import { getSPAPIBaseUrl, getSellerConfig } from "./sellerConfig";
 
 function isEnabled(): boolean {
   return process.env.AMAZON_SP_API_ENABLED === "true";
@@ -24,8 +23,9 @@ async function makeRequest<T>(
 
   // Get fresh token
   const token = await tokenManager.getAccessToken();
+  const baseUrl = getSPAPIBaseUrl();
 
-  const response = await fetch(`${SP_API_BASE}${endpoint}`, {
+  const response = await fetch(`${baseUrl}${endpoint}`, {
     headers: {
       "x-amz-access-token": token,
       "Content-Type": "application/json",
@@ -61,8 +61,9 @@ export const spapiClient = {
   isEnabled,
 
   async getCatalogItem(asin: string): Promise<LiveDataEnvelope<SPAPICatalogItem>> {
+    const { marketplaceId } = getSellerConfig();
     return makeRequest<SPAPICatalogItem>(
-      `/catalog/2022-04-01/items/${asin}?marketplaceIds=ATVPDKIKX0DER`,
+      `/catalog/2022-04-01/items/${encodeURIComponent(asin)}?marketplaceIds=${marketplaceId}`,
       "catalog",
       `catalog:${asin}`,
       86400,
@@ -70,8 +71,9 @@ export const spapiClient = {
   },
 
   async getPricing(asin: string): Promise<LiveDataEnvelope<SPAPIPricing>> {
+    const { marketplaceId } = getSellerConfig();
     return makeRequest<SPAPIPricing>(
-      `/products/pricing/v0/price?MarketplaceId=ATVPDKIKX0DER&Asins=${asin}`,
+      `/products/pricing/v0/price?MarketplaceId=${marketplaceId}&Asins=${encodeURIComponent(asin)}`,
       "pricing",
       `pricing:${asin}`,
       3600,
@@ -79,8 +81,9 @@ export const spapiClient = {
   },
 
   async getReviews(asin: string): Promise<LiveDataEnvelope<SPAPIReviewData>> {
+    const { marketplaceId } = getSellerConfig();
     return makeRequest<SPAPIReviewData>(
-      `/products/reviews/v0/${asin}?MarketplaceId=ATVPDKIKX0DER`,
+      `/products/reviews/v0/${encodeURIComponent(asin)}?MarketplaceId=${marketplaceId}`,
       "reviews",
       `reviews:${asin}`,
       21600,
@@ -88,8 +91,9 @@ export const spapiClient = {
   },
 
   async getBSR(asin: string): Promise<LiveDataEnvelope<SPAPIBSRData>> {
+    const { marketplaceId } = getSellerConfig();
     return makeRequest<SPAPIBSRData>(
-      `/sales/v1/orderMetrics?marketplaceIds=ATVPDKIKX0DER&asin=${asin}`,
+      `/sales/v1/orderMetrics?marketplaceIds=${marketplaceId}&asin=${encodeURIComponent(asin)}`,
       "bsr",
       `bsr:${asin}`,
       1800,
@@ -97,8 +101,9 @@ export const spapiClient = {
   },
 
   async getInventory(asin: string): Promise<LiveDataEnvelope<SPAPIInventoryData>> {
+    const { marketplaceId } = getSellerConfig();
     return makeRequest<SPAPIInventoryData>(
-      `/fba/inventory/v1/summaries?marketplaceIds=ATVPDKIKX0DER&sellerSkus=${asin}`,
+      `/fba/inventory/v1/summaries?marketplaceIds=${marketplaceId}&sellerSkus=${encodeURIComponent(asin)}`,
       "inventory",
       `inventory:${asin}`,
       3600,
@@ -107,10 +112,34 @@ export const spapiClient = {
 
   async getFees(asin: string): Promise<LiveDataEnvelope<SPAPIFeeEstimate>> {
     return makeRequest<SPAPIFeeEstimate>(
-      `/products/fees/v0/items/${asin}/feesEstimate`,
+      `/products/fees/v0/items/${encodeURIComponent(asin)}/feesEstimate`,
       "fees",
       `fees:${asin}`,
       7200,
+    );
+  },
+
+  /**
+   * Search catalog items by seller ID via official SP-API Catalog Items API.
+   * Used to discover the seller's product inventory.
+   */
+  async searchSellerCatalog(
+    pageToken?: string
+  ): Promise<LiveDataEnvelope<{ items: SPAPICatalogItem[]; nextPageToken?: string }>> {
+    const { marketplaceId, sellerId } = getSellerConfig();
+    const params = new URLSearchParams({
+      marketplaceIds: marketplaceId,
+      sellerId,
+      includedData: "summaries,identifiers",
+      pageSize: "20",
+    });
+    if (pageToken) params.set("pageToken", pageToken);
+
+    return makeRequest(
+      `/catalog/2022-04-01/items?${params.toString()}`,
+      "catalog",
+      `catalog-search:${sellerId}:${pageToken ?? "first"}`,
+      3600,
     );
   },
 };

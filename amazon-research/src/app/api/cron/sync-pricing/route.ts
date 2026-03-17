@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { syncPricing } from "@/lib/spapi/sync/pricingSync";
-import { MOCK_PRODUCTS } from "@/lib/mock-data";
+import { getSellerProductASINs } from "@/lib/services/productSource";
+import { markSyncStarted, markSyncCompleted, markSyncFailed } from "@/lib/services/syncStatus";
 
 export const dynamic = "force-dynamic";
 
@@ -14,7 +15,26 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ message: "SP-API disabled", synced: 0 });
   }
 
-  const asins = MOCK_PRODUCTS.map((p) => p.asin);
-  const result = await syncPricing(asins);
-  return NextResponse.json(result);
+  try {
+    await markSyncStarted("pricing");
+    const asins = await getSellerProductASINs();
+
+    if (asins.length === 0) {
+      return NextResponse.json({ message: "No products to sync", synced: 0 });
+    }
+
+    const result = await syncPricing(asins);
+
+    if (result.errors.length > 0) {
+      await markSyncFailed("pricing", result.errors);
+    } else {
+      await markSyncCompleted("pricing", result.synced);
+    }
+
+    return NextResponse.json(result);
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : "Unknown error";
+    await markSyncFailed("pricing", [msg]).catch(() => {});
+    return NextResponse.json({ error: "Sync failed", detail: msg }, { status: 500 });
+  }
 }

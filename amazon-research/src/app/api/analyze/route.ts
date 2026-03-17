@@ -141,7 +141,7 @@ export async function POST(request: NextRequest) {
           opportunitySummary: analysisResult.opportunitySummary,
           improvementIdeas: analysisResult.improvementIdeas,
           keyThemes: analysisResult.keyThemes,
-          claudeModel: "claude-sonnet-4-20250514",
+          claudeModel: process.env.OLLAMA_MODEL || "qwen3:8b",
           promptTokens: 0,
           completionTokens: 0,
           processingTimeMs,

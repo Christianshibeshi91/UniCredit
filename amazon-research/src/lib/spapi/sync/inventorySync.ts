@@ -1,13 +1,30 @@
 import type { SyncResult } from "@/lib/types/spapi";
 import { spapiClient } from "../client";
+import { getAdminDb } from "@/lib/firebase/admin";
+import { Timestamp } from "firebase-admin/firestore";
 
 export async function syncInventory(asins: string[]): Promise<SyncResult> {
   const errors: string[] = [];
   let synced = 0;
+  const db = getAdminDb();
 
   for (const asin of asins) {
     try {
-      await spapiClient.getInventory(asin);
+      const envelope = await spapiClient.getInventory(asin);
+      const inventory = envelope.data;
+
+      // Persist to Firestore
+      await db.collection("products").doc(asin).set(
+        {
+          fulfillableQuantity: inventory.fulfillableQuantity,
+          inboundQuantity: inventory.inboundQuantity,
+          reservedQuantity: inventory.reservedQuantity,
+          updatedAt: Timestamp.now(),
+          lastInventorySync: Timestamp.now(),
+        },
+        { merge: true }
+      );
+
       synced++;
     } catch (error) {
       errors.push(`${asin}: ${error instanceof Error ? error.message : "Unknown error"}`);

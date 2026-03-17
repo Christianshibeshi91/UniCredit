@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useCallback, useRef } from "react";
+import { getAuthHeaders } from "@/hooks/useAuth";
 import type {
   URLAnalysisReport,
   URLAnalysisSSEEvent,
@@ -97,9 +98,10 @@ export function useURLAnalysis() {
     abortRef.current = new AbortController();
 
     try {
+      const authHeaders = await getAuthHeaders();
       const response = await fetch("/api/url-analysis/run", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...authHeaders },
         body: JSON.stringify({ url }),
         signal: abortRef.current.signal,
       });
@@ -133,9 +135,10 @@ export function useURLAnalysis() {
     abortRef.current = new AbortController();
 
     try {
+      const authHeaders = await getAuthHeaders();
       const response = await fetch("/api/url-analysis/compare", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...authHeaders },
         body: JSON.stringify({ urls }),
         signal: abortRef.current.signal,
       });
@@ -160,7 +163,10 @@ export function useURLAnalysis() {
 
   const fetchReport = useCallback(async (id: string) => {
     try {
-      const response = await fetch(`/api/url-analysis/report/${encodeURIComponent(id)}`);
+      const authHeaders = await getAuthHeaders();
+      const response = await fetch(`/api/url-analysis/report/${encodeURIComponent(id)}`, {
+        headers: authHeaders,
+      });
       if (!response.ok) throw new Error("Report not found");
       const data = await response.json();
       setReport(data);

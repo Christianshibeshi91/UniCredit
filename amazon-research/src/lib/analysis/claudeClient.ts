@@ -3,11 +3,11 @@
  * Provides the same interface so all consuming code works unchanged.
  *
  * Set OLLAMA_BASE_URL (default: http://localhost:11434) and
- * OLLAMA_MODEL (default: qwen2.5) to configure.
+ * OLLAMA_MODEL (default: qwen3:8b) to configure.
  */
 
 const OLLAMA_BASE_URL = process.env.OLLAMA_BASE_URL || "http://localhost:11434";
-const OLLAMA_MODEL = process.env.OLLAMA_MODEL || "qwen2.5";
+const OLLAMA_MODEL = process.env.OLLAMA_MODEL || "qwen3:8b";
 
 // ── Anthropic-Compatible Types ───────────────────────────────────
 
@@ -86,7 +86,7 @@ interface OllamaResponse {
   eval_count?: number;
 }
 
-function parseOllamaResponse(data: OllamaResponse): Anthropic.MessageResponse {
+function parseOllamaResponse(data: OllamaResponse, fallbackToolName?: string): Anthropic.MessageResponse {
   const content: Anthropic.ContentBlock[] = [];
 
   if (data.message?.content) {
@@ -103,13 +103,14 @@ function parseOllamaResponse(data: OllamaResponse): Anthropic.MessageResponse {
     }
   }
 
-  // Fallback: if model returned JSON in content instead of a tool call, extract it
+  // Fallback: if model returned JSON in content instead of a tool call, extract it.
+  // Use the requested tool_choice name so callers that check by name still match.
   if (!data.message?.tool_calls && data.message?.content) {
     try {
       const jsonMatch = data.message.content.match(/\{[\s\S]*\}/);
       if (jsonMatch) {
         const parsed = JSON.parse(jsonMatch[0]);
-        content.push({ type: "tool_use", id: crypto.randomUUID(), name: "_fallback_json", input: parsed });
+        content.push({ type: "tool_use", id: crypto.randomUUID(), name: fallbackToolName || "_fallback_json", input: parsed });
       }
     } catch {
       // Not valid JSON — leave as text only
@@ -165,7 +166,11 @@ const messages = {
     }
 
     const data = (await response.json()) as OllamaResponse;
-    return parseOllamaResponse(data);
+    const fallbackToolName =
+      params.tool_choice && "name" in params.tool_choice
+        ? params.tool_choice.name
+        : undefined;
+    return parseOllamaResponse(data, fallbackToolName);
   },
 
   /** Thin wrapper: calls create() and emits text events after completion. */
@@ -205,10 +210,8 @@ export const MODEL = OLLAMA_MODEL;
 export const INTELLIGENCE_MODEL = OLLAMA_MODEL;
 export const ANALYSIS_MODEL = OLLAMA_MODEL;
 
-/** True when an LLM backend is configured (Ollama URL or Anthropic key). */
-export const isLLMConfigured = Boolean(
-  process.env.OLLAMA_BASE_URL || process.env.ANTHROPIC_API_KEY
-);
+/** True when an LLM backend is configured (Ollama URL). */
+export const isLLMConfigured = Boolean(process.env.OLLAMA_BASE_URL);
 
 // ── Error Classes ─────────────────────────────────────────────────
 

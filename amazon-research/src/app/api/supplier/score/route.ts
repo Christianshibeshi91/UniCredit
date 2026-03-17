@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { getMockScoredSuppliers } from "@/lib/mock-suggestions";
+import { getMockScoredSuppliers, getMockSupplierSearch } from "@/lib/mock-suggestions";
+import { scoreSuppliers } from "@/lib/analysis/supplierAdvisor";
 import type { SupplierProfile } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -51,8 +52,8 @@ export async function POST(request: Request) {
     // Sanitize supplier profiles if provided
     const sanitized = suppliers?.map(stripHtmlFromProfile);
 
-    // If no API key, return mock data
-    if (!process.env.ANTHROPIC_API_KEY) {
+    // If no LLM configured, return mock data
+    if (!process.env.OLLAMA_BASE_URL) {
       const scored = getMockScoredSuppliers(suggestionId);
       if (!scored || scored.length === 0) {
         return NextResponse.json(
@@ -67,18 +68,29 @@ export async function POST(request: Request) {
       });
     }
 
-    // In production, would call scoreSuppliers() with sanitized supplier data
-    const scored = getMockScoredSuppliers(suggestionId);
-    if (!scored || scored.length === 0) {
+    // Get the product spec from mock supplier search for scoring context
+    const search = getMockSupplierSearch(suggestionId);
+    if (!search) {
       return NextResponse.json(
-        { error: "Scored suppliers not found" },
+        { error: "Supplier search not found for this suggestion" },
         { status: 404 }
       );
     }
+
+    // Use provided suppliers or fall back to mock suppliers from the search
+    const suppliersToScore = sanitized || search.suppliers;
+    if (!suppliersToScore || suppliersToScore.length === 0) {
+      return NextResponse.json(
+        { error: "No suppliers to score" },
+        { status: 400 }
+      );
+    }
+
+    const scored = await scoreSuppliers(suppliersToScore, search.productSpec);
     return NextResponse.json({
       scoredSuppliers: scored,
       sanitizedInput: sanitized ? sanitized.length : 0,
-      source: "mock",
+      source: "ollama",
     });
   } catch (error) {
     console.error("[API /supplier/score] Error:", error);

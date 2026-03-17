@@ -10,44 +10,40 @@ interface ScoreBadgeProps {
   className?: string;
 }
 
-const tierColors: Record<Tier, { bg: string; text: string; border: string }> = {
-  S: { bg: "bg-violet-500/20", text: "text-violet-400", border: "border-violet-500/30" },
-  A: { bg: "bg-indigo-500/20", text: "text-indigo-400", border: "border-indigo-500/30" },
-  B: { bg: "bg-blue-500/20", text: "text-blue-400", border: "border-blue-500/30" },
-  C: { bg: "bg-amber-500/20", text: "text-amber-400", border: "border-amber-500/30" },
-  D: { bg: "bg-rose-500/20", text: "text-rose-400", border: "border-rose-500/30" },
+const tierConfig: Record<Tier, { bg: string; text: string; border: string; ring: string }> = {
+  S: { bg: "bg-violet-500/15", text: "text-violet-400", border: "border-violet-500/30", ring: "ring-violet-500/20" },
+  A: { bg: "bg-indigo-500/15", text: "text-indigo-400", border: "border-indigo-500/30", ring: "ring-indigo-500/20" },
+  B: { bg: "bg-blue-500/15", text: "text-blue-400", border: "border-blue-500/30", ring: "ring-blue-500/20" },
+  C: { bg: "bg-amber-500/15", text: "text-amber-400", border: "border-amber-500/30", ring: "ring-amber-500/20" },
+  D: { bg: "bg-rose-500/15", text: "text-rose-400", border: "border-rose-500/30", ring: "ring-rose-500/20" },
 };
 
-const sizeClasses = {
-  sm: "px-2 py-0.5 text-xs",
-  md: "px-3 py-1 text-sm",
-  lg: "px-4 py-1.5 text-base",
+const sizeConfig = {
+  sm: { badge: "w-10 h-10", tier: "text-xs", score: "text-[9px]" },
+  md: { badge: "w-12 h-12", tier: "text-sm", score: "text-[10px]" },
+  lg: { badge: "w-14 h-14", tier: "text-base", score: "text-xs" },
 };
 
 export function ScoreBadge({ score, tier, size = "md", className }: ScoreBadgeProps) {
-  const colors = tierColors[tier];
+  const colors = tierConfig[tier];
+  const sizes = sizeConfig[size];
 
   return (
-    <div className={cn("inline-flex items-center gap-2", className)}>
-      <span
-        className={cn(
-          "font-mono font-bold tabular-nums",
-          sizeClasses[size],
-          colors.text
-        )}
-      >
-        {score}
-      </span>
-      <span
-        className={cn(
-          "rounded-full font-bold border",
-          sizeClasses[size],
-          colors.bg,
-          colors.text,
-          colors.border
-        )}
-      >
+    <div
+      className={cn(
+        "relative flex flex-col items-center justify-center rounded-full border ring-2 transition-all",
+        sizes.badge,
+        colors.bg,
+        colors.border,
+        colors.ring,
+        className
+      )}
+    >
+      <span className={cn("font-extrabold leading-none", sizes.tier, colors.text)}>
         {tier}
+      </span>
+      <span className={cn("font-mono font-bold leading-none mt-0.5 text-slate-500 dark:text-zinc-400", sizes.score)}>
+        {score}
       </span>
     </div>
   );

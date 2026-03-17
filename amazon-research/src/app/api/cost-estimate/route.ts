@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { getMockCostEstimate } from "@/lib/mock-suggestions";
+import { getMockCostEstimate, getMockSuggestions } from "@/lib/mock-suggestions";
+import { estimateStartupCost } from "@/lib/analysis/costEstimator";
 
 export const runtime = "nodejs";
 
@@ -15,8 +16,8 @@ export async function POST(request: Request) {
       );
     }
 
-    // If no API key, return mock data
-    if (!process.env.ANTHROPIC_API_KEY) {
+    // If no LLM configured, return mock data
+    if (!process.env.OLLAMA_BASE_URL) {
       const estimate = getMockCostEstimate(suggestionId);
       if (!estimate) {
         return NextResponse.json(
@@ -27,15 +28,18 @@ export async function POST(request: Request) {
       return NextResponse.json({ estimate, source: "mock" });
     }
 
-    // In production, would call estimateStartupCost()
-    const estimate = getMockCostEstimate(suggestionId);
-    if (!estimate) {
+    // Look up the suggestion to feed into the cost estimator
+    const suggestions = getMockSuggestions();
+    const suggestion = suggestions.find((s) => s.id === suggestionId);
+    if (!suggestion) {
       return NextResponse.json(
-        { error: "Cost estimate not found" },
+        { error: "Suggestion not found" },
         { status: 404 }
       );
     }
-    return NextResponse.json({ estimate, source: "mock" });
+
+    const estimate = await estimateStartupCost(suggestion);
+    return NextResponse.json({ estimate, source: "ollama" });
   } catch (error) {
     console.error("[API /cost-estimate] Error:", error);
     return NextResponse.json(

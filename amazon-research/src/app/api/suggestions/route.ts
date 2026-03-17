@@ -1,11 +1,14 @@
 import { NextResponse } from "next/server";
 import { getMockSuggestions } from "@/lib/mock-suggestions";
+import { generateSuggestions } from "@/lib/analysis/productSuggestionEngine";
+import { getAdminDb } from "@/lib/firebase/admin";
+import type { Product, AnalysisResult } from "@/lib/types";
 
 export const runtime = "nodejs";
 
 export async function GET() {
   try {
-    // Always return mock data (no ANTHROPIC_API_KEY check needed for GET)
+    // Always return mock data (no LLM check needed for GET)
     const suggestions = getMockSuggestions();
     return NextResponse.json({ suggestions });
   } catch (error) {
@@ -19,8 +22,8 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
-    // If no API key, return mock data
-    if (!process.env.ANTHROPIC_API_KEY) {
+    // If no LLM configured, return mock data
+    if (!process.env.OLLAMA_BASE_URL) {
       const suggestions = getMockSuggestions();
       return NextResponse.json({ suggestions, source: "mock" });
     }
@@ -39,13 +42,38 @@ export async function POST(request: Request) {
       );
     }
 
-    // In production, would call generateSuggestions() with real product/analysis data
-    // For now, return mock data
+    // Fetch products and analyses from Firestore for LLM-powered generation
+    if (productIds && productIds.length > 0) {
+      const db = getAdminDb();
+      const products: Product[] = [];
+      const analyses: AnalysisResult[] = [];
+
+      for (const id of productIds) {
+        const [productDoc, analysisDoc] = await Promise.all([
+          db.collection("products").doc(id).get(),
+          db.collection("analysis").doc(id).get(),
+        ]);
+
+        if (productDoc.exists && analysisDoc.exists) {
+          products.push({ id: productDoc.id, ...productDoc.data() } as Product);
+          analyses.push(analysisDoc.data() as AnalysisResult);
+        }
+      }
+
+      if (products.length > 0 && analyses.length > 0) {
+        let suggestions = await generateSuggestions(products, analyses);
+        if (categoryFilter) {
+          suggestions = suggestions.filter((s) => s.category === categoryFilter);
+        }
+        return NextResponse.json({ suggestions, source: "ollama" });
+      }
+    }
+
+    // Fallback to mock if no Firestore data available
     let suggestions = getMockSuggestions();
     if (categoryFilter) {
       suggestions = suggestions.filter((s) => s.category === categoryFilter);
     }
-
     return NextResponse.json({ suggestions, source: "mock" });
   } catch (error) {
     console.error("[API /suggestions] Error:", error);

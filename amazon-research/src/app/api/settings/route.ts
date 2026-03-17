@@ -5,17 +5,19 @@ import { Timestamp } from "firebase-admin/firestore";
 
 export const runtime = "nodejs";
 
-// Allowed Claude model values — must match UI dropdown and claudeClient.ts
+// Allowed Ollama model values — must match UI dropdown
 const ALLOWED_MODELS = new Set([
-  "claude-sonnet-4-20250514",
-  "claude-opus-4-6",
-  "claude-haiku-4-5-20251001",
+  "qwen3:8b",
+  "gemma2:9b",
+  "llama3.1:8b",
+  "deepseek-v3.1:671b-cloud",
+  "gpt-oss:120b-cloud",
 ]);
 
 const DEFAULT_SETTINGS = {
   autoAnalyzeNewProducts: true,
   enableResponseCaching: true,
-  claudeModel: "claude-sonnet-4-20250514",
+  claudeModel: "qwen3:8b",
   maxReviewsPerBatch: 50,
   analysisCompletionAlerts: true,
   theme: "dark" as const,

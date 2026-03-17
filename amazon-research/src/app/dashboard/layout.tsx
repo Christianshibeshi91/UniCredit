@@ -167,7 +167,7 @@ function SidebarContent({
             <span className="text-xs font-medium text-zinc-700 dark:text-zinc-300">API Active</span>
           </div>
           <p className="text-[10px] text-zinc-500">
-            Claude Sonnet 4 &middot; Firebase connected
+            Qwen3 8B &middot; Firebase connected
           </p>
         </div>
       </div>

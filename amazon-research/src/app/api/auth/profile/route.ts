@@ -8,7 +8,7 @@ export const runtime = "nodejs";
 const DEFAULT_SETTINGS = {
   autoAnalyzeNewProducts: true,
   enableResponseCaching: true,
-  claudeModel: "claude-sonnet-4-20250514",
+  claudeModel: "qwen3:8b",
   maxReviewsPerBatch: 50,
   analysisCompletionAlerts: true,
   theme: "dark" as const,

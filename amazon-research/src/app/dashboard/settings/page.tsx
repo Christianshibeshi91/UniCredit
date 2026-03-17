@@ -40,7 +40,7 @@ function SettingSection({
   delay: number;
 }) {
   return (
-    <motion.div {...anim(delay)} className="glass-card rounded-xl p-6">
+    <motion.div {...anim(delay)} className="glass-card gradient-border-glow rounded-xl p-6">
       <div className="flex items-start gap-3 mb-5">
         <div className="p-2 rounded-lg bg-zinc-200/50 dark:bg-zinc-800/50">
           <Icon className={cn("h-4 w-4", iconColor)} />
@@ -107,13 +107,13 @@ export default function SettingsPage() {
   const autoAnalyze = settings.autoAnalyzeNewProducts;
   const notifications = settings.analysisCompletionAlerts;
   const caching = settings.enableResponseCaching;
-  const [claudeModel, setClaudeModel] = useState(settings.claudeModel);
+  const [ollamaModel, setOllamaModel] = useState(settings.claudeModel);
   const [maxReviews, setMaxReviews] = useState(settings.maxReviewsPerBatch);
 
   // Sync local controlled state when settings load from API
   const [synced, setSynced] = useState(false);
   if (!isLoading && !synced) {
-    setClaudeModel(settings.claudeModel);
+    setOllamaModel(settings.claudeModel);
     setMaxReviews(settings.maxReviewsPerBatch);
     setSynced(true);
   }
@@ -124,7 +124,7 @@ export default function SettingsPage() {
 
   const handleSave = async () => {
     await updateSettings({
-      claudeModel,
+      claudeModel: ollamaModel,
       maxReviewsPerBatch: maxReviews,
       theme,
     });
@@ -134,7 +134,7 @@ export default function SettingsPage() {
     <div className="space-y-6 max-w-3xl">
       {/* Header */}
       <motion.div {...anim(0)}>
-        <h1 className="text-2xl font-bold gradient-text">Settings</h1>
+        <h1 className="text-3xl font-extrabold gradient-text tracking-tight">Settings</h1>
         <p className="text-sm text-zinc-500 mt-1">
           Configure your research dashboard preferences
         </p>
@@ -186,28 +186,29 @@ export default function SettingsPage() {
         <div>
           <Toggle
             label="Auto-analyze new products"
-            description="Automatically run Claude analysis when a new product is added"
+            description="Automatically run Ollama analysis when a new product is added"
             checked={autoAnalyze}
             onChange={setAutoAnalyze}
           />
           <Toggle
             label="Enable response caching"
-            description="Cache analysis results for 7 days to save API costs"
+            description="Cache analysis results for 7 days to reduce processing"
             checked={caching}
             onChange={setCaching}
           />
           <div className="py-3">
             <label className="text-sm text-zinc-700 dark:text-zinc-300 mb-2 block">
-              Claude Model
+              Ollama Model
             </label>
             <select
-              value={claudeModel}
-              onChange={(e) => setClaudeModel(e.target.value)}
+              value={ollamaModel}
+              onChange={(e) => setOllamaModel(e.target.value)}
               className="rounded-lg bg-zinc-100/80 dark:bg-zinc-800/80 border border-zinc-300/50 dark:border-zinc-700/50 px-3 py-2 text-sm text-zinc-700 dark:text-zinc-300 focus:outline-none focus:ring-1 focus:ring-indigo-500/50 w-full"
             >
-              <option value="claude-sonnet-4-20250514">Claude Sonnet 4 (claude-sonnet-4-20250514)</option>
-              <option value="claude-opus-4-20250514">Claude Opus 4 (claude-opus-4-20250514)</option>
-              <option value="claude-haiku-35-20241022">Claude Haiku 3.5 (claude-haiku-35-20241022)</option>
+              <option value="qwen3:8b">Qwen3 8B (recommended)</option>
+              <option value="gemma2:9b">Gemma2 9B</option>
+              <option value="llama3.1:8b">Llama 3.1 8B</option>
+              <option value="deepseek-v3.1:671b-cloud">DeepSeek V3.1 671B (cloud)</option>
             </select>
           </div>
           <div className="py-3">
@@ -310,10 +311,8 @@ export default function SettingsPage() {
           onClick={handleSave}
           disabled={isSaving}
           className={cn(
-            "flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-medium text-white transition-all",
-            saveSuccess
-              ? "bg-emerald-600"
-              : "bg-indigo-600 hover:bg-indigo-500",
+            "btn-gradient",
+            saveSuccess && "!bg-emerald-600 !shadow-emerald-500/25",
             isSaving && "opacity-60 cursor-not-allowed"
           )}
         >
