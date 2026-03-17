@@ -82,7 +82,7 @@ export function exportElementAsPDF(elementId: string, title?: string): void {
         </style>
       </head>
       <body>
-        ${element.innerHTML}
+        ${sanitizeHtml(element.innerHTML)}
       </body>
     </html>
   `);
@@ -114,4 +114,45 @@ function escapeHtml(text: string): string {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#039;");
+}
+
+/**
+ * Sanitize HTML content for safe injection into print window.
+ * Strips script tags, event handlers, and dangerous attributes
+ * while preserving safe structural/styling HTML.
+ */
+function sanitizeHtml(html: string): string {
+  // Create a temporary DOM element to parse the HTML safely
+  const temp = document.createElement("div");
+  temp.innerHTML = html;
+
+  // Remove all script elements
+  const scripts = temp.querySelectorAll("script");
+  scripts.forEach((el) => el.remove());
+
+  // Remove all elements with dangerous tags
+  const dangerousTags = temp.querySelectorAll("iframe, object, embed, form, link[rel='import']");
+  dangerousTags.forEach((el) => el.remove());
+
+  // Remove event handler attributes and dangerous attributes from all elements
+  const allElements = temp.querySelectorAll("*");
+  allElements.forEach((el) => {
+    const attrs = Array.from(el.attributes);
+    for (const attr of attrs) {
+      const name = attr.name.toLowerCase();
+      // Remove event handlers (onclick, onerror, onload, etc.)
+      if (name.startsWith("on")) {
+        el.removeAttribute(attr.name);
+      }
+      // Remove javascript: URLs in href/src/action
+      if (
+        (name === "href" || name === "src" || name === "action") &&
+        attr.value.trim().toLowerCase().startsWith("javascript:")
+      ) {
+        el.removeAttribute(attr.name);
+      }
+    }
+  });
+
+  return temp.innerHTML;
 }

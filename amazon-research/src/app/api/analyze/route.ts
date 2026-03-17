@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { adminDb } from "@/lib/firebase/admin";
+import { getAdminDb } from "@/lib/firebase/admin";
 import { Timestamp } from "firebase-admin/firestore";
 import {
   analyzeProductReviewsStreaming,
@@ -38,7 +38,7 @@ export async function POST(request: NextRequest) {
 
   // Check if fresh analysis exists
   if (!forceReanalyze) {
-    const existingAnalysis = await adminDb
+    const existingAnalysis = await getAdminDb()
       .collection("analysis")
       .doc(productId)
       .get();
@@ -61,7 +61,7 @@ export async function POST(request: NextRequest) {
   }
 
   // Fetch product
-  const productDoc = await adminDb.collection("products").doc(productId).get();
+  const productDoc = await getAdminDb().collection("products").doc(productId).get();
   if (!productDoc.exists) {
     return new Response(
       JSON.stringify({ error: "Product not found" }),
@@ -71,7 +71,7 @@ export async function POST(request: NextRequest) {
   const product = { id: productDoc.id, ...productDoc.data() } as Product;
 
   // Fetch reviews
-  const reviewsSnapshot = await adminDb
+  const reviewsSnapshot = await getAdminDb()
     .collection("reviews")
     .where("productId", "==", productId)
     .get();
@@ -87,7 +87,7 @@ export async function POST(request: NextRequest) {
   }
 
   // Set analysis status to processing
-  await adminDb.collection("analysis").doc(productId).set(
+  await getAdminDb().collection("analysis").doc(productId).set(
     {
       productId,
       status: "processing",
@@ -127,9 +127,9 @@ export async function POST(request: NextRequest) {
         emit({ type: "score", data: score });
 
         // Atomic batch write: analysis + opportunity
-        const batch = adminDb.batch();
+        const batch = getAdminDb().batch();
 
-        batch.set(adminDb.collection("analysis").doc(productId), {
+        batch.set(getAdminDb().collection("analysis").doc(productId), {
           id: productId,
           productId,
           status: "complete",
@@ -149,7 +149,7 @@ export async function POST(request: NextRequest) {
           updatedAt: Timestamp.now(),
         });
 
-        batch.set(adminDb.collection("opportunities").doc(productId), {
+        batch.set(getAdminDb().collection("opportunities").doc(productId), {
           id: productId,
           productId,
           ...score,
@@ -160,7 +160,7 @@ export async function POST(request: NextRequest) {
         emit({ type: "done" });
       } catch (error) {
         // Mark analysis as failed
-        await adminDb
+        await getAdminDb()
           .collection("analysis")
           .doc(productId)
           .set(

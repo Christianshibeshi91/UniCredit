@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -24,6 +24,9 @@ import {
 import { cn } from "@/lib/utils";
 import { useTheme } from "@/components/ThemeProvider";
 import { SearchDialog, useSearchDialog } from "@/components/ui/SearchDialog";
+import { useAuth } from "@/hooks/useAuth";
+import { AuthGuard } from "@/components/auth/AuthGuard";
+import { ToastProvider } from "@/components/ui/ToastProvider";
 
 const NAV_ITEMS = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -38,9 +41,15 @@ const NAV_ITEMS = [
 function SidebarContent({
   pathname,
   onNavClick,
+  userName,
+  userEmail,
+  onSignOut,
 }: {
   pathname: string;
   onNavClick?: () => void;
+  userName?: string;
+  userEmail?: string;
+  onSignOut?: () => void;
 }) {
   const { theme, toggleTheme } = useTheme();
   const search = useSearchDialog();
@@ -119,14 +128,15 @@ function SidebarContent({
             <User className="h-4 w-4 text-indigo-400" />
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-xs font-medium text-zinc-700 dark:text-zinc-300 truncate">User</p>
-            <p className="text-[10px] text-zinc-500 truncate">user@example.com</p>
+            <p className="text-xs font-medium text-zinc-700 dark:text-zinc-300 truncate">
+              {userName || "User"}
+            </p>
+            <p className="text-[10px] text-zinc-500 truncate">
+              {userEmail || "Not signed in"}
+            </p>
           </div>
           <button
-            onClick={() => {
-              // TODO: Wire to Firebase signOut when AuthProvider is built
-              console.log("Sign out");
-            }}
+            onClick={onSignOut}
             className="p-1.5 rounded-lg text-zinc-400 hover:text-red-400 hover:bg-red-500/10 transition-colors"
             aria-label="Sign out"
             title="Sign out"
@@ -172,7 +182,19 @@ export default function DashboardLayout({
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
+  const router = useRouter();
+  const auth = useAuth();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+
+  const handleSignOut = async () => {
+    await auth.signOut();
+    // Clear the session cookie used by middleware
+    document.cookie = "__session=; path=/; max-age=0; SameSite=Strict";
+    router.push("/login");
+  };
+
+  const userName = auth.user?.displayName ?? auth.user?.email?.split("@")[0] ?? "User";
+  const userEmail = auth.user?.email ?? "Not signed in";
 
   // Close mobile menu on route change
   useEffect(() => {
@@ -203,10 +225,12 @@ export default function DashboardLayout({
   }, [mobileMenuOpen]);
 
   return (
+    <AuthGuard isAuthenticated={!!auth.user} loading={auth.loading}>
+    <ToastProvider>
     <div className="min-h-screen bg-mesh">
       {/* Desktop sidebar */}
       <aside className="hidden lg:flex fixed inset-y-0 left-0 z-40 w-64 flex-col bg-[#f8f8fb] dark:bg-zinc-950/80 backdrop-blur-xl border-r border-zinc-200/50 dark:border-zinc-800/50">
-        <SidebarContent pathname={pathname} />
+        <SidebarContent pathname={pathname} userName={userName} userEmail={userEmail} onSignOut={handleSignOut} />
       </aside>
 
       {/* Mobile header */}
@@ -254,7 +278,7 @@ export default function DashboardLayout({
                 <X className="h-4 w-4" />
               </button>
 
-              <SidebarContent pathname={pathname} onNavClick={() => setMobileMenuOpen(false)} />
+              <SidebarContent pathname={pathname} onNavClick={() => setMobileMenuOpen(false)} userName={userName} userEmail={userEmail} onSignOut={handleSignOut} />
             </motion.aside>
           </>
         )}
@@ -267,5 +291,7 @@ export default function DashboardLayout({
         </div>
       </main>
     </div>
+    </ToastProvider>
+    </AuthGuard>
   );
 }

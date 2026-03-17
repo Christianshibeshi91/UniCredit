@@ -4,7 +4,7 @@
  * validates, and stores in Firestore.
  */
 import { getAdminDb } from "@/lib/firebase/admin";
-import { Timestamp } from "firebase-admin/firestore";
+import { Timestamp, FieldValue } from "firebase-admin/firestore";
 import { spapiClient } from "@/lib/spapi/client";
 import type { Product } from "@/lib/types";
 
@@ -126,12 +126,12 @@ export async function ingestProduct(
     // Write to Firestore
     await db.collection("products").doc(asin).set(productData);
 
-    // Increment user's product count
+    // Atomically increment user's product count
     await db
       .collection("users")
       .doc(userId)
       .update({
-        productsAdded: (await db.collection("users").doc(userId).get()).data()?.productsAdded + 1 || 1,
+        productsAdded: FieldValue.increment(1),
         updatedAt: now,
       })
       .catch(() => {

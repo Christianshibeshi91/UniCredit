@@ -11,9 +11,12 @@ import {
   Palette,
   Shield,
   Check,
+  Loader2,
+  AlertCircle,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useTheme } from "@/components/ThemeProvider";
+import { useSettings } from "@/hooks/useSettings";
 
 const anim = (delay: number) => ({
   initial: { opacity: 0, y: 12 },
@@ -91,14 +94,40 @@ function Toggle({
 
 export default function SettingsPage() {
   const { theme, setTheme } = useTheme();
-  const [autoAnalyze, setAutoAnalyze] = useState(true);
-  const [notifications, setNotifications] = useState(true);
-  const [caching, setCaching] = useState(true);
-  const [saved, setSaved] = useState(false);
+  const {
+    settings,
+    isLoading,
+    isSaving,
+    error: settingsError,
+    saveSuccess,
+    updateSettings,
+  } = useSettings();
 
-  const handleSave = () => {
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2000);
+  // Derive local state from the hook's settings
+  const autoAnalyze = settings.autoAnalyzeNewProducts;
+  const notifications = settings.analysisCompletionAlerts;
+  const caching = settings.enableResponseCaching;
+  const [claudeModel, setClaudeModel] = useState(settings.claudeModel);
+  const [maxReviews, setMaxReviews] = useState(settings.maxReviewsPerBatch);
+
+  // Sync local controlled state when settings load from API
+  const [synced, setSynced] = useState(false);
+  if (!isLoading && !synced) {
+    setClaudeModel(settings.claudeModel);
+    setMaxReviews(settings.maxReviewsPerBatch);
+    setSynced(true);
+  }
+
+  const setAutoAnalyze = (v: boolean) => updateSettings({ autoAnalyzeNewProducts: v });
+  const setNotifications = (v: boolean) => updateSettings({ analysisCompletionAlerts: v });
+  const setCaching = (v: boolean) => updateSettings({ enableResponseCaching: v });
+
+  const handleSave = async () => {
+    await updateSettings({
+      claudeModel,
+      maxReviewsPerBatch: maxReviews,
+      theme,
+    });
   };
 
   return (
@@ -175,10 +204,14 @@ export default function SettingsPage() {
             <label className="text-sm text-zinc-700 dark:text-zinc-300 mb-2 block">
               Claude Model
             </label>
-            <select className="rounded-lg bg-zinc-100/80 dark:bg-zinc-800/80 border border-zinc-300/50 dark:border-zinc-700/50 px-3 py-2 text-sm text-zinc-700 dark:text-zinc-300 focus:outline-none focus:ring-1 focus:ring-indigo-500/50 w-full">
-              <option>Claude Sonnet 4 (claude-sonnet-4-20250514)</option>
-              <option>Claude Opus 4.6 (claude-opus-4-6)</option>
-              <option>Claude Haiku 4.5 (claude-haiku-4-5-20251001)</option>
+            <select
+              value={claudeModel}
+              onChange={(e) => setClaudeModel(e.target.value)}
+              className="rounded-lg bg-zinc-100/80 dark:bg-zinc-800/80 border border-zinc-300/50 dark:border-zinc-700/50 px-3 py-2 text-sm text-zinc-700 dark:text-zinc-300 focus:outline-none focus:ring-1 focus:ring-indigo-500/50 w-full"
+            >
+              <option value="claude-sonnet-4-20250514">Claude Sonnet 4 (claude-sonnet-4-20250514)</option>
+              <option value="claude-opus-4-20250514">Claude Opus 4 (claude-opus-4-20250514)</option>
+              <option value="claude-haiku-35-20241022">Claude Haiku 3.5 (claude-haiku-35-20241022)</option>
             </select>
           </div>
           <div className="py-3">
@@ -187,7 +220,11 @@ export default function SettingsPage() {
             </label>
             <input
               type="number"
-              defaultValue={50}
+              value={maxReviews}
+              onChange={(e) => {
+                const val = parseInt(e.target.value, 10);
+                if (!Number.isNaN(val)) setMaxReviews(Math.max(10, Math.min(200, val)));
+              }}
               min={10}
               max={200}
               className="w-24 rounded-lg bg-zinc-100/80 dark:bg-zinc-800/80 border border-zinc-300/50 dark:border-zinc-700/50 px-3 py-2 text-sm text-zinc-700 dark:text-zinc-300 text-center font-mono focus:outline-none focus:ring-1 focus:ring-indigo-500/50"
@@ -263,18 +300,33 @@ export default function SettingsPage() {
         />
       </SettingSection>
 
+      {/* Error display */}
+      {settingsError && (
+        <motion.div {...anim(0.28)} className="flex items-center gap-2 px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-xs" role="alert">
+          <AlertCircle className="h-4 w-4 shrink-0" />
+          <span>{settingsError}</span>
+        </motion.div>
+      )}
+
       {/* Save */}
       <motion.div {...anim(0.3)} className="flex items-center gap-3">
         <button
           onClick={handleSave}
+          disabled={isSaving}
           className={cn(
             "flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-medium text-white transition-all",
-            saved
+            saveSuccess
               ? "bg-emerald-600"
-              : "bg-indigo-600 hover:bg-indigo-500"
+              : "bg-indigo-600 hover:bg-indigo-500",
+            isSaving && "opacity-60 cursor-not-allowed"
           )}
         >
-          {saved ? (
+          {isSaving ? (
+            <>
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Saving...
+            </>
+          ) : saveSuccess ? (
             <>
               <Check className="h-4 w-4" />
               Saved!
@@ -287,7 +339,7 @@ export default function SettingsPage() {
           )}
         </button>
         <span className="text-xs text-zinc-500">
-          Settings are stored locally in this prototype
+          {isLoading ? "Loading settings..." : "Settings are synced with your account"}
         </span>
       </motion.div>
     </div>

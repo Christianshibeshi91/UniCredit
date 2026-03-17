@@ -26,6 +26,12 @@ export function LoginForm({ onSubmit, onForgotPassword, className }: LoginFormPr
       setError("Email is required");
       return;
     }
+    // Basic email format validation (RFC 5322 simplified)
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email.trim())) {
+      setError("Please enter a valid email address");
+      return;
+    }
     if (!password) {
       setError("Password is required");
       return;

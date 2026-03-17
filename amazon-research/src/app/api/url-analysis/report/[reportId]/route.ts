@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { analysisStore } from "../../run/route";
+import { getAnalysisReport } from "@/lib/stores/analysisStore";
 import { getMockURLAnalysisReport } from "@/lib/mock-url-analysis";
 
 export async function GET(
@@ -9,7 +9,7 @@ export async function GET(
   const { reportId } = await params;
 
   // Check in-memory store
-  const stored = analysisStore.get(reportId);
+  const stored = getAnalysisReport(reportId);
   if (stored) {
     return Response.json(stored);
   }

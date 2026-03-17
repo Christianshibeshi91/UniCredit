@@ -16,7 +16,8 @@ export async function GET(request: NextRequest) {
 
     const limitParam = searchParams.get("limit");
     const cursor = searchParams.get("cursor");
-    const limit = Math.min(50, Math.max(1, parseInt(limitParam ?? "20", 10) || 20));
+    const parsedLimit = parseInt(limitParam ?? "20", 10);
+    const limit = Math.min(50, Math.max(1, Number.isNaN(parsedLimit) ? 20 : parsedLimit));
 
     const db = getAdminDb();
 

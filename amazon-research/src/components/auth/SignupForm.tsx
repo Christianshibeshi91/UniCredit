@@ -65,6 +65,12 @@ export function SignupForm({ onSubmit, className }: SignupFormProps) {
       setError("Email is required");
       return;
     }
+    // Basic email format validation
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email.trim())) {
+      setError("Please enter a valid email address");
+      return;
+    }
     if (strength.score < 3) {
       setError("Password is too weak. Please use a stronger password.");
       return;

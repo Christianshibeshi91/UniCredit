@@ -5,11 +5,11 @@ import { Timestamp } from "firebase-admin/firestore";
 
 export const runtime = "nodejs";
 
-// Allowed Claude model values
+// Allowed Claude model values — must match UI dropdown and claudeClient.ts
 const ALLOWED_MODELS = new Set([
   "claude-sonnet-4-20250514",
-  "claude-haiku-35-20241022",
-  "claude-opus-4-20250514",
+  "claude-opus-4-6",
+  "claude-haiku-4-5-20251001",
 ]);
 
 const DEFAULT_SETTINGS = {
@@ -101,6 +101,7 @@ export async function PUT(request: NextRequest) {
     if (body.maxReviewsPerBatch !== undefined) {
       if (
         typeof body.maxReviewsPerBatch !== "number" ||
+        Number.isNaN(body.maxReviewsPerBatch) ||
         body.maxReviewsPerBatch < 10 ||
         body.maxReviewsPerBatch > 200
       ) {

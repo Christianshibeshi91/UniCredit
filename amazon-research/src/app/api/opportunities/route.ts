@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { adminDb } from "@/lib/firebase/admin";
+import { getAdminDb } from "@/lib/firebase/admin";
 
 export const runtime = "nodejs";
 
@@ -12,9 +12,10 @@ export async function GET(request: NextRequest) {
     const recommendation = searchParams.get("recommendation");
     const limitParam = searchParams.get("limit");
 
-    const limit = Math.min(100, Math.max(1, parseInt(limitParam ?? "50", 10) || 50));
+    const parsedLimit = parseInt(limitParam ?? "50", 10);
+    const limit = Math.min(100, Math.max(1, Number.isNaN(parsedLimit) ? 50 : parsedLimit));
 
-    let query = adminDb
+    let query = getAdminDb()
       .collection("opportunities")
       .orderBy("opportunityScore", "desc")
       .limit(limit);

@@ -33,7 +33,8 @@ interface SearchableItem {
  */
 export function useSearch(items: SearchableItem[]): UseSearchReturn {
   const [query, setQuery] = useState("");
-  const [isSearching] = useState(false);
+  // Search is synchronous (useMemo), so isSearching is always false
+  const isSearching = false;
 
   const results = useMemo(() => {
     if (!query || query.length < 2) return [];
@@ -55,15 +56,15 @@ export function useSearch(items: SearchableItem[]): UseSearchReturn {
           continue;
         }
 
-        // Contains full query
-        if (normalizedField.includes(normalizedQuery)) {
-          bestScore = Math.max(bestScore, 0.8);
+        // Starts with query (higher relevance than general contains)
+        if (normalizedField.startsWith(normalizedQuery)) {
+          bestScore = Math.max(bestScore, 0.9);
           continue;
         }
 
-        // Starts with query
-        if (normalizedField.startsWith(normalizedQuery)) {
-          bestScore = Math.max(bestScore, 0.9);
+        // Contains full query
+        if (normalizedField.includes(normalizedQuery)) {
+          bestScore = Math.max(bestScore, 0.8);
           continue;
         }
 

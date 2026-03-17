@@ -8,12 +8,21 @@ import type { Product } from "@/lib/types";
 import type { IntelligenceReport } from "@/lib/types/intelligence";
 
 /**
- * Escape a CSV field value (handles commas, quotes, newlines).
+ * Escape a CSV field value (handles commas, quotes, newlines, and formula injection).
+ * Prefixes cells starting with formula trigger characters (=, +, -, @) with a
+ * tab character to prevent formula injection in Excel/Google Sheets.
  */
 function escapeCSV(value: unknown): string {
   if (value === null || value === undefined) return "";
-  const str = String(value);
-  if (str.includes(",") || str.includes('"') || str.includes("\n")) {
+  let str = String(value);
+
+  // Prevent CSV formula injection: prefix dangerous leading characters with a tab
+  const FORMULA_TRIGGERS = ["=", "+", "-", "@"];
+  if (str.length > 0 && FORMULA_TRIGGERS.includes(str[0])) {
+    str = "\t" + str;
+  }
+
+  if (str.includes(",") || str.includes('"') || str.includes("\n") || str.includes("\t")) {
     return `"${str.replace(/"/g, '""')}"`;
   }
   return str;

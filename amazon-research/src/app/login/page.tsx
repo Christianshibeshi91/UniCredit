@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { Zap } from "lucide-react";
@@ -8,30 +8,69 @@ import { cn } from "@/lib/utils";
 import { LoginForm } from "@/components/auth/LoginForm";
 import { SignupForm } from "@/components/auth/SignupForm";
 import { GoogleSignInButton } from "@/components/auth/GoogleSignInButton";
+import { useAuth } from "@/hooks/useAuth";
 
 type Tab = "login" | "signup";
 
+/**
+ * Set the __session cookie used by middleware for route protection.
+ * Uses SameSite=Strict and Secure (in production) to mitigate CSRF.
+ */
+function setSessionCookie(token: string) {
+  const isSecure = window.location.protocol === "https:";
+  document.cookie = `__session=${encodeURIComponent(token)}; path=/; max-age=3600; SameSite=Strict${isSecure ? "; Secure" : ""}`;
+}
+
+function clearSessionCookie() {
+  document.cookie = "__session=; path=/; max-age=0; SameSite=Strict";
+}
+
 export default function LoginPage() {
   const router = useRouter();
+  const auth = useAuth();
   const [tab, setTab] = useState<Tab>("login");
 
-  // Placeholder handlers — wire to Firebase Auth when AuthProvider is built
-  const handleLogin = async (email: string, _password: string) => {
-    // TODO: Replace with Firebase signInWithEmailAndPassword
-    console.log("Login:", email);
-    router.push("/dashboard");
+  // Redirect to dashboard when user is authenticated and token is available
+  useEffect(() => {
+    if (auth.user && auth.token) {
+      setSessionCookie(auth.token);
+      router.push("/dashboard");
+    }
+    if (!auth.user && !auth.loading) {
+      clearSessionCookie();
+    }
+  }, [auth.user, auth.token, auth.loading, router]);
+
+  const handleLogin = async (email: string, password: string) => {
+    await auth.signIn(email, password);
+    // Redirect happens via useEffect when auth state updates
   };
 
-  const handleSignup = async (name: string, email: string, _password: string) => {
-    // TODO: Replace with Firebase createUserWithEmailAndPassword
-    console.log("Signup:", name, email);
-    router.push("/dashboard");
+  const handleSignup = async (name: string, email: string, password: string) => {
+    // useAuth.signUp accepts (email, password); name is handled via profile API inside the hook
+    // We pass name to the profile API separately after signup succeeds
+    await auth.signUp(email, password);
+    // After signup, update display name via profile API if name was provided
+    if (name && auth.token) {
+      try {
+        await fetch("/api/auth/profile", {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${auth.token}`,
+          },
+          body: JSON.stringify({ displayName: name.trim() }),
+        });
+      } catch {
+        // Non-critical: profile name update failed, user is still created
+      }
+    }
+    // Redirect happens via useEffect when auth state updates
   };
 
   const handleGoogleSignIn = async () => {
-    // TODO: Replace with Firebase signInWithPopup(GoogleAuthProvider)
-    console.log("Google sign-in");
-    router.push("/dashboard");
+    await auth.signInWithGoogle();
+    // Redirect happens via useEffect when auth state updates
   };
 
   return (
@@ -145,6 +184,25 @@ export default function LoginPage() {
 
           {/* Google sign-in */}
           <GoogleSignInButton onSignIn={handleGoogleSignIn} />
+
+          {/* Auth-level error display */}
+          {auth.error && (
+            <motion.div
+              initial={{ opacity: 0, y: -4 }}
+              animate={{ opacity: 1, y: 0 }}
+              role="alert"
+              className="mt-4 flex items-center gap-2 px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-xs"
+            >
+              <span>{auth.error}</span>
+              <button
+                onClick={auth.clearError}
+                className="ml-auto text-red-400 hover:text-red-300 transition-colors"
+                aria-label="Dismiss error"
+              >
+                &times;
+              </button>
+            </motion.div>
+          )}
         </div>
 
         {/* Footer */}

@@ -36,8 +36,12 @@ export function useAuth(): UseAuthReturn {
       if (firebaseUser) {
         const idToken = await firebaseUser.getIdToken();
         setToken(idToken);
+        // Set session cookie for middleware route protection
+        document.cookie = `__session=${idToken}; path=/; max-age=3600; SameSite=Lax; Secure`;
       } else {
         setToken(null);
+        // Clear session cookie on sign-out
+        document.cookie = "__session=; path=/; max-age=0; SameSite=Lax; Secure";
       }
       setLoading(false);
     });
@@ -113,6 +117,8 @@ export function useAuth(): UseAuthReturn {
   const signOut = useCallback(async () => {
     setError(null);
     try {
+      // Clear session cookie before signing out
+      document.cookie = "__session=; path=/; max-age=0; SameSite=Lax; Secure";
       await firebaseSignOut();
     } catch (err) {
       const message = err instanceof Error ? err.message : "Sign out failed";

@@ -11,8 +11,7 @@ export const runtime = "nodejs";
  */
 export async function GET(request: NextRequest) {
   try {
-    // Auth verification — TODO: uncomment when auth is fully wired in UI
-    // await verifyAuthToken(request);
+    await verifyAuthToken(request);
 
     const db = getAdminDb();
 

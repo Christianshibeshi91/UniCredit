@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { adminDb } from "@/lib/firebase/admin";
+import { getAdminDb } from "@/lib/firebase/admin";
 import { verifyAuthToken, AuthError } from "@/lib/firebase/auth-admin";
 import { ingestProduct, IngestionError } from "@/lib/services/productIngestion";
 import { ingestReviews } from "@/lib/services/reviewIngestion";
+import { checkRateLimit } from "@/lib/rateLimit";
 
 export const runtime = "nodejs";
 
@@ -20,8 +21,7 @@ const DEFAULT_LIMIT = 20;
 
 export async function GET(request: NextRequest) {
   try {
-    // Auth verification — TODO: uncomment when auth is fully wired in UI
-    // await verifyAuthToken(request);
+    await verifyAuthToken(request);
     const { searchParams } = request.nextUrl;
 
     const category = searchParams.get("category");
@@ -40,21 +40,22 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Validate limit
+    // Validate limit — use nullish coalescing to handle limit=0 correctly (clamp to 1)
+    const parsedLimit = parseInt(limitParam ?? String(DEFAULT_LIMIT), 10);
     const limit = Math.min(
       MAX_LIMIT,
-      Math.max(1, parseInt(limitParam ?? String(DEFAULT_LIMIT), 10) || DEFAULT_LIMIT)
+      Math.max(1, Number.isNaN(parsedLimit) ? DEFAULT_LIMIT : parsedLimit)
     );
 
     // Build Firestore query
-    let query = adminDb.collection("products").orderBy(sortBy, "desc").limit(limit);
+    let query = getAdminDb().collection("products").orderBy(sortBy, "desc").limit(limit);
 
     if (category) {
       query = query.where("category", "==", category);
     }
 
     if (cursor) {
-      const cursorDoc = await adminDb.collection("products").doc(cursor).get();
+      const cursorDoc = await getAdminDb().collection("products").doc(cursor).get();
       if (cursorDoc.exists) {
         query = query.startAfter(cursorDoc);
       }
@@ -75,7 +76,7 @@ export async function GET(request: NextRequest) {
       }
 
       for (const chunk of chunks) {
-        const oppSnapshot = await adminDb
+        const oppSnapshot = await getAdminDb()
           .collection("opportunities")
           .where("productId", "in", chunk)
           .get();
@@ -149,12 +150,28 @@ export async function GET(request: NextRequest) {
  * POST /api/products
  * Add a product by ASIN. Fetches data from Amazon SP-API and stores in Firestore.
  *
- * Rate limit consideration: Each POST triggers 2-4 SP-API calls (catalog, pricing,
- * BSR, reviews). Consider adding per-user rate limiting (e.g., 10 products/hour).
+ * Rate limited: 10 products per hour per user to prevent SP-API exhaustion.
  */
 export async function POST(request: NextRequest) {
   try {
     const auth = await verifyAuthToken(request);
+
+    // Per-user rate limiting: 10 products per hour
+    const rateLimit = checkRateLimit(`products:${auth.uid}`, 10, 60 * 60 * 1000);
+    if (!rateLimit.allowed) {
+      return NextResponse.json(
+        {
+          error: "Rate limit exceeded. Maximum 10 products per hour.",
+          retryAfter: Math.ceil((rateLimit.resetAt - Date.now()) / 1000),
+        },
+        {
+          status: 429,
+          headers: {
+            "Retry-After": String(Math.ceil((rateLimit.resetAt - Date.now()) / 1000)),
+          },
+        }
+      );
+    }
 
     let body: { asin?: string; autoAnalyze?: boolean };
     try {
