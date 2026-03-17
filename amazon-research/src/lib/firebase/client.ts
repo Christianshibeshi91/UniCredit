@@ -10,15 +10,23 @@ const firebaseConfig = {
   appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
 };
 
+const isConfigured = Boolean(firebaseConfig.apiKey && firebaseConfig.projectId);
+
 let app: FirebaseApp;
 let db: Firestore;
 
-if (getApps().length === 0) {
-  app = initializeApp(firebaseConfig);
+if (isConfigured) {
+  if (getApps().length === 0) {
+    app = initializeApp(firebaseConfig);
+  } else {
+    app = getApp();
+  }
+  db = getFirestore(app);
 } else {
-  app = getApp();
+  // Prevent crash when Firebase env vars are not set (e.g. first deploy)
+  console.warn("Firebase not configured: NEXT_PUBLIC_FIREBASE_API_KEY and NEXT_PUBLIC_FIREBASE_PROJECT_ID are required.");
+  app = null as unknown as FirebaseApp;
+  db = null as unknown as Firestore;
 }
 
-db = getFirestore(app);
-
-export { app, db };
+export { app, db, isConfigured };

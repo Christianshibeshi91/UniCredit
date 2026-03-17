@@ -15,11 +15,14 @@ import {
   type User,
   type UserCredential,
 } from "firebase/auth";
-import { app } from "./client";
+import { app, isConfigured } from "./client";
 
 let _auth: Auth | null = null;
 
 function getFirebaseAuth(): Auth {
+  if (!isConfigured) {
+    throw new Error("Firebase is not configured. Set NEXT_PUBLIC_FIREBASE_API_KEY and NEXT_PUBLIC_FIREBASE_PROJECT_ID environment variables.");
+  }
   if (!_auth) {
     _auth = getAuth(app);
   }
