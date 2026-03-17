@@ -1,7 +1,15 @@
 {
   "outputDirectory": "stitch_app/frontend/build/web",
   "framework": null,
+  "functions": {
+    "api/index.js": {
+      "maxDuration": 30,
+      "includeFiles": "stitch_app/backend/src/**"
+    }
+  },
   "rewrites": [
+    { "source": "/api/v1/:path*", "destination": "/api" },
+    { "source": "/health", "destination": "/api" },
     { "source": "/(.*)", "destination": "/index.html" }
   ]
 }

@@ -1,9 +1,8 @@
-"""ATS-optimized resume tailoring — Claude API with free local fallback."""
+"""ATS-optimized resume tailoring — Ollama/Qwen with template fallback."""
 
 import json
 import os
 import re
-import anthropic  # pyre-ignore[21]
 from dotenv import load_dotenv  # pyre-ignore[21]
 
 from LinkedinAutomation.alert_user import alert  # pyre-ignore[21]
@@ -301,31 +300,14 @@ CERTIFICATIONS
 
 
 def tailor(job, score_data, profile=None):
-    """Tailor resume for job. Tries Claude first, falls back to template."""
+    """Tailor resume for job. Uses Ollama/Qwen, falls back to template."""
     if profile is None:
         profile = _load_profile()
 
     resume_text = None
 
-    # Try Claude API first
-    api_key = os.getenv("ANTHROPIC_API_KEY", "")
-    if api_key:
-        try:
-            client = anthropic.Anthropic(api_key=api_key)
-            model = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-20250514")
-
-            prompt = _build_resume_prompt(job, score_data, profile)
-            response = client.messages.create(
-                model=model,
-                max_tokens=2000,
-                messages=[{"role": "user", "content": prompt}],
-            )
-            resume_text = _clean_output(response.content[0].text)
-        except Exception as e:
-            alert("Resume", f"Claude API unavailable ({e}), using template resume", "warning")
-
     # Try Ollama hybrid: LLM for summary + competencies, template for the rest
-    if resume_text is None and ollama_available():
+    if ollama_available():
         alert("Resume", f"Using Ollama ({OLLAMA_WRITING_MODEL}) hybrid for resume")
 
         # 1. Get tailored summary from Ollama

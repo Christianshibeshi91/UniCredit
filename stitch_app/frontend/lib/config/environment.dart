@@ -4,10 +4,11 @@ class Environment {
   Environment._();
 
   /// API base URL. Override at build time:
-  /// flutter run --dart-define=API_BASE_URL=https://api.unicredit.app
+  /// flutter run --dart-define=API_BASE_URL=http://localhost:3000
+  /// In production (Vercel), leave empty for same-origin API calls.
   static const String apiBaseUrl = String.fromEnvironment(
     'API_BASE_URL',
-    defaultValue: 'http://localhost:3000',
+    defaultValue: '',
   );
 
   /// API version prefix.

@@ -5,7 +5,6 @@ services:
     ports:
       - "8000:8000" # Only expose the API port
     environment:
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - MAX_AGENTS=50
       - MEMORY_POOL_MB=65536
       - OLLAMA_HOST=http://host.docker.internal:11434

@@ -1,17 +1,17 @@
 """Interview prep automation — generates STAR answers, company research, and prep materials.
 
 Triggered when a job's Application Status is changed to "Interview" in Google Sheets.
-Uses Claude API to generate tailored interview prep and sends via Telegram.
+Uses Ollama/Qwen to generate tailored interview prep and sends via Telegram.
 """
 
 import json
 import os
 
-import anthropic  # pyre-ignore[21]
 import requests  # pyre-ignore[21]
 from dotenv import load_dotenv  # pyre-ignore[21]
 
 from LinkedinAutomation.alert_user import alert  # pyre-ignore[21]
+from LinkedinAutomation.ollama_client import generate as ollama_generate, is_available as ollama_available, OLLAMA_WRITING_MODEL  # pyre-ignore[21]
 from LinkedinAutomation.log_to_sheets import get_rows_by_status  # pyre-ignore[21]
 
 BASE_DIR = os.path.dirname(os.path.dirname(__file__))
@@ -92,25 +92,18 @@ Format the output in clean, readable text with clear section headers."""
 
 
 def generate_prep(job_row: dict) -> str:
-    """Generate interview prep materials using Claude API."""
+    """Generate interview prep materials using Ollama/Qwen."""
     profile = _load_profile()
     prompt = _build_prep_prompt(job_row, profile)
 
-    api_key = os.getenv("ANTHROPIC_API_KEY", "")
-    if not api_key:
-        return "ERROR: ANTHROPIC_API_KEY not set. Cannot generate interview prep."
+    if not ollama_available():
+        return "ERROR: Ollama is not running. Start it with: ollama serve"
 
     try:
-        client = anthropic.Anthropic(api_key=api_key)
-        model = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-20250514")
-
-        response = client.messages.create(
-            model=model,
-            max_tokens=4000,
-            messages=[{"role": "user", "content": prompt}],
-        )
-
-        return response.content[0].text
+        result = ollama_generate(prompt, model=OLLAMA_WRITING_MODEL, max_tokens=4000)
+        if result and len(result.strip()) > 100:
+            return result
+        return "ERROR: Ollama returned empty response"
     except Exception as e:
         return f"ERROR generating prep: {e}"
 

@@ -75,16 +75,19 @@ function validateEnv() {
       errors.push('JWT_SECRET must be changed from default in production');
     }
 
-    // Production-required secrets
-    const productionRequired = [
+    // Production-required secrets (hard requirements)
+    if (!env.FIREBASE_SERVICE_ACCOUNT_JSON) {
+      errors.push('FIREBASE_SERVICE_ACCOUNT_JSON is required in production');
+    }
+
+    // Production-recommended secrets (soft warnings)
+    const recommended = [
       ['STRIPE_WEBHOOK_SECRET', env.STRIPE_WEBHOOK_SECRET],
       ['REDIS_URL', env.REDIS_URL],
-      ['FIREBASE_SERVICE_ACCOUNT_JSON', env.FIREBASE_SERVICE_ACCOUNT_JSON],
     ];
-
-    for (const [name, value] of productionRequired) {
+    for (const [name, value] of recommended) {
       if (!value) {
-        errors.push(`${name} is required in production`);
+        console.warn(`WARNING: ${name} is not set — feature will be degraded`);
       }
     }
   }

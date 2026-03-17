@@ -152,10 +152,6 @@ def main():
     config.scraper.max_pages_per_task = args.max_pages
     config.search.search_engine = args.search_engine
 
-    if config.llm_provider == "anthropic" and not config.llm_api_key:
-        print("Error: ANTHROPIC_API_KEY environment variable not set")
-        sys.exit(1)
-
     if args.query:
         output = asyncio.run(run_research(args.query, config, args.format))
         if args.output:

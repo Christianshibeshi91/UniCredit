@@ -69,9 +69,8 @@ class RuntimeConfig:
 @dataclass
 class AgentConfig:
     max_loop_iterations: int = 5  # More iterations for deeper research
-    llm_provider: str = "ollama"  # "ollama" or "anthropic"
+    llm_provider: str = "ollama"
     llm_model: str = os.environ.get("LLM_MODEL", "qwen3:8b")
-    llm_api_key: str = field(default_factory=lambda: os.environ.get("ANTHROPIC_API_KEY", ""))
     ollama_host: str = os.environ.get("OLLAMA_HOST", "http://10.0.0.200:11434")
     browser: BrowserConfig = field(default_factory=BrowserConfig)
     search: SearchConfig = field(default_factory=SearchConfig)

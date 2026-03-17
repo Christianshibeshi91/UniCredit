@@ -1,9 +1,8 @@
-"""Cover letter generation — Claude API with free local fallback."""
+"""Cover letter generation — Ollama/Qwen with template fallback."""
 
 import json
 import os
 import re
-import anthropic  # pyre-ignore[21]
 from dotenv import load_dotenv  # pyre-ignore[21]
 
 from LinkedinAutomation.alert_user import alert  # pyre-ignore[21]
@@ -158,31 +157,14 @@ Sincerely,
 
 
 def generate(job, score_data, profile=None):
-    """Generate cover letter. Tries Claude first, falls back to template."""
+    """Generate cover letter. Uses Ollama/Qwen, falls back to template."""
     if profile is None:
         profile = _load_profile()
 
     cl_text = None
 
-    # Try Claude API first
-    api_key = os.getenv("ANTHROPIC_API_KEY", "")
-    if api_key:
-        try:
-            client = anthropic.Anthropic(api_key=api_key)
-            model = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-20250514")
-
-            prompt = _build_cl_prompt(job, score_data, profile)
-            response = client.messages.create(
-                model=model,
-                max_tokens=1200,
-                messages=[{"role": "user", "content": prompt}],
-            )
-            cl_text = _clean_cl_output(response.content[0].text)
-        except Exception as e:
-            alert("Cover Letter", f"Claude API unavailable ({e}), using template", "warning")
-
-    # Try Ollama (free local LLM)
-    if cl_text is None and ollama_available():
+    # Try Ollama (local LLM)
+    if ollama_available():
         alert("Cover Letter", f"Using Ollama ({OLLAMA_WRITING_MODEL}) for cover letter")
         prompt = _build_cl_prompt(job, score_data, profile)
         result = ollama_generate(prompt, model=OLLAMA_WRITING_MODEL, max_tokens=1200)

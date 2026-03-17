@@ -11,23 +11,30 @@ function createCorsMiddleware() {
   const env = process.env.NODE_ENV || 'development';
   const originsEnv = process.env.ALLOWED_ORIGINS;
 
-  // Fail-secure: require ALLOWED_ORIGINS in production
-  if (env === 'production' && !originsEnv) {
-    throw new Error(
-      'FATAL: ALLOWED_ORIGINS environment variable is required in production. ' +
-      'Set it to a comma-separated list of allowed origins.'
-    );
-  }
-
   // Parse allowed origins
-  const allowedOrigins = originsEnv
-    ? originsEnv.split(',').map((o) => o.trim()).filter(Boolean)
-    : [
-        'http://localhost:8080',
-        'http://localhost:3000',
-        'http://localhost:5000',
-        'http://127.0.0.1:8080',
-      ];
+  let allowedOrigins;
+  if (originsEnv) {
+    allowedOrigins = originsEnv.split(',').map((o) => o.trim()).filter(Boolean);
+  } else if (env === 'production') {
+    // Auto-detect Vercel deployment URLs
+    allowedOrigins = [];
+    if (process.env.VERCEL_URL) {
+      allowedOrigins.push(`https://${process.env.VERCEL_URL}`);
+    }
+    if (process.env.VERCEL_PROJECT_PRODUCTION_URL) {
+      allowedOrigins.push(`https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`);
+    }
+    if (allowedOrigins.length === 0) {
+      console.warn('[CORS] No ALLOWED_ORIGINS or VERCEL_URL set in production');
+    }
+  } else {
+    allowedOrigins = [
+      'http://localhost:8080',
+      'http://localhost:3000',
+      'http://localhost:5000',
+      'http://127.0.0.1:8080',
+    ];
+  }
 
   const corsOptions = {
     origin: function (origin, callback) {

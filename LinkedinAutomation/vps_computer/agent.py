@@ -1,7 +1,6 @@
 """Agent Controller - Core reasoning and planning engine.
 
-Supports both Ollama (local LLM) and Anthropic (cloud) backends.
-Default: Ollama with Qwen 3.4B at http://192.168.111.1:11434
+Uses Ollama with Qwen for local LLM inference.
 """
 
 import asyncio
@@ -122,14 +121,7 @@ class AgentController:
 
     async def _llm_call(self, system: str, prompt: str,
                         max_tokens: int = 2000) -> str:
-        """Make a call to the LLM (Ollama or Anthropic)."""
-        if self.config.llm_provider == "ollama":
-            return await self._ollama_call(system, prompt)
-        else:
-            return await self._anthropic_call(system, prompt, max_tokens)
-
-    async def _ollama_call(self, system: str, prompt: str) -> str:
-        """Call Ollama API at the remote host."""
+        """Make a call to Ollama LLM."""
         url = f"{self.config.ollama_host}/api/chat"
         payload = {
             "model": self.config.llm_model,
@@ -140,7 +132,7 @@ class AgentController:
             "stream": False,
             "options": {
                 "temperature": 0.3,
-                "num_predict": 2000,
+                "num_predict": max_tokens,
             },
         }
 
@@ -148,19 +140,6 @@ class AgentController:
         response.raise_for_status()
         data = response.json()
         return data["message"]["content"]
-
-    async def _anthropic_call(self, system: str, prompt: str,
-                              max_tokens: int = 2000) -> str:
-        """Call Anthropic API (fallback)."""
-        import anthropic
-        client = anthropic.Anthropic(api_key=self.config.llm_api_key)
-        response = client.messages.create(
-            model=self.config.llm_model,
-            max_tokens=max_tokens,
-            system=system,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        return response.content[0].text
 
     async def _llm_json(self, system: str, prompt: str,
                         max_tokens: int = 2000) -> dict:
