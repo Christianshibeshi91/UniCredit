@@ -1,0 +1,16 @@
+node_modules
+.next
+.git
+.gitignore
+.env
+.env.*
+!.env.local.example
+.vercel
+*.md
+*.html
+*.png
+stitch-*
+tests
+coverage
+.DS_Store
+npm-debug.log*

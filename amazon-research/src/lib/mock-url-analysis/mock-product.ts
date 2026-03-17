@@ -1,0 +1,42 @@
+import type { NormalizedProduct } from "@/lib/types/urlAnalysis";
+
+export const MOCK_NORMALIZED_PRODUCT: NormalizedProduct = {
+  url: "https://www.amazon.com/dp/B09KXBCZ7L",
+  source: "amazon",
+  asin: "B09KXBCZ7L",
+  title: "Bamboo Cutting Board Set (3-Piece) with Juice Groove & Easy-Grip Handles — Organic, Pre-Oiled, BPA-Free Kitchen Boards for Meat, Vegetables & Cheese",
+  brand: "GreenChef Essentials",
+  category: "Kitchen & Dining",
+  subcategory: "Cutting Boards",
+  price: 34.99,
+  currency: "USD",
+  rating: 4.6,
+  reviewCount: 3847,
+  bsr: 2341,
+  bsrCategory: "Kitchen & Dining",
+  description: "Upgrade your kitchen prep with our premium 3-piece bamboo cutting board set. Each board features deep juice grooves to catch runoff, easy-grip side handles for secure lifting, and a smooth, knife-friendly surface that won't dull your blades. Made from 100% organic Moso bamboo — one of the fastest-growing renewable resources — these boards are naturally antimicrobial and pre-oiled for lasting durability. Includes large (18x12\"), medium (14x10\"), and small (11x8\") sizes for every task from carving roasts to slicing fruit.",
+  bulletPoints: [
+    "3-PIECE SET: Large (18x12\"), medium (14x10\"), small (11x8\") — one board for every task",
+    "DEEP JUICE GROOVE: Catches liquid runoff from meats and fruits, keeping counters clean",
+    "EASY-GRIP HANDLES: Built-in side handles for secure, comfortable lifting even when wet",
+    "100% ORGANIC BAMBOO: Naturally antimicrobial, BPA-free, and eco-friendly renewable material",
+    "PRE-OILED & READY: Arrives pre-treated with food-safe mineral oil — use right out of the box",
+  ],
+  images: [
+    "https://images-na.ssl-images-amazon.com/images/I/71kxBcZ7lL._AC_SL1500_.jpg",
+    "https://images-na.ssl-images-amazon.com/images/I/81jKpReT4L._AC_SL1500_.jpg",
+    "https://images-na.ssl-images-amazon.com/images/I/71QmR3pXkL._AC_SL1500_.jpg",
+    "https://images-na.ssl-images-amazon.com/images/I/81xYzK3nFL._AC_SL1500_.jpg",
+    "https://images-na.ssl-images-amazon.com/images/I/71hJwPqR2L._AC_SL1500_.jpg",
+    "https://images-na.ssl-images-amazon.com/images/I/81mN7k3JxL._AC_SL1500_.jpg",
+    "https://images-na.ssl-images-amazon.com/images/I/71vXcZ8qRL._AC_SL1500_.jpg",
+  ],
+  videos: [],
+  variants: [
+    { name: "Size", options: ["3-Piece Set", "Single Large", "Single XL with Stand"] },
+  ],
+  qaCount: 142,
+  isPrime: true,
+  fulfillmentType: "FBA",
+  seller: "GreenChef Essentials",
+};

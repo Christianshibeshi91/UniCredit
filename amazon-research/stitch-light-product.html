@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+
+<html lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>FitForge - Light Mode Product Deep Dive Analysis</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700;900&display=swap');
+    </style>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "primary": "#5449e9",
+                        "background-light": "#f6f6f8",
+                        "background-dark": "#121121",
+                        "primary-light": "#e8e8f3",
+                        "primary-dark": "#0f0e1b",
+                        "primary-accent": "#544f96"
+                    },
+                    fontFamily: {
+                        "display": ["Inter", "sans-serif"]
+                    },
+                    borderRadius: { "DEFAULT": "0.25rem", "lg": "0.5rem", "xl": "0.75rem", "full": "9999px" },
+                },
+            },
+        }
+    </script>
+</head>
+<body class="bg-background-light dark:bg-background-dark text-slate-900 dark:text-slate-100 font-display min-h-screen antialiased selection:bg-primary/30 selection:text-primary-dark">
+<!-- Background Gradient -->
+<div class="fixed inset-0 z-0 pointer-events-none bg-gradient-to-br from-indigo-500/5 via-violet-500/5 to-fuchsia-500/5 dark:from-indigo-500/10 dark:via-violet-500/10 dark:to-fuchsia-500/10"></div>
+<div class="relative z-10 flex h-screen w-full flex-col overflow-hidden">
+<div class="flex h-full grow flex-col sm:flex-row">
+<!-- Sidebar -->
+<aside class="flex w-full sm:w-64 flex-col bg-white dark:bg-slate-900 border-r border-slate-200 dark:border-slate-800 p-4 shrink-0 transition-colors duration-300 shadow-sm z-20">
+<div class="flex items-center gap-3 px-2 py-4 mb-6">
+<div class="size-8 text-primary">
+<svg fill="none" viewbox="0 0 48 48" xmlns="http://www.w3.org/2000/svg">
+<path clip-rule="evenodd" d="M24 0.757355L47.2426 24L24 47.2426L0.757355 24L24 0.757355ZM21 35.7574V12.2426L9.24264 24L21 35.7574Z" fill="currentColor" fill-rule="evenodd"></path>
+</svg>
+</div>
+<div>
+<h2 class="text-slate-900 dark:text-white text-xl font-bold leading-tight tracking-tight">FitForge</h2>
+<p class="text-slate-500 dark:text-slate-400 text-xs font-medium uppercase tracking-wider">Product Analysis</p>
+</div>
+</div>
+<nav class="flex flex-col gap-1 flex-1">
+<a class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-white transition-colors group" href="#">
+<span class="material-symbols-outlined text-slate-400 group-hover:text-primary transition-colors">home</span>
+<span class="text-sm font-medium">Dashboard</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-white transition-colors group" href="#">
+<span class="material-symbols-outlined text-slate-400 group-hover:text-primary transition-colors">search</span>
+<span class="text-sm font-medium">Product Search</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2.5 rounded-lg bg-primary/10 text-primary dark:text-primary-light font-medium group" href="#">
+<span class="material-symbols-outlined text-primary">analytics</span>
+<span class="text-sm">Deep Dive</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-white transition-colors group" href="#">
+<span class="material-symbols-outlined text-slate-400 group-hover:text-primary transition-colors">track_changes</span>
+<span class="text-sm font-medium">Tracker</span>
+</a>
+</nav>
+<div class="mt-auto border-t border-slate-200 dark:border-slate-800 pt-4 flex flex-col gap-2">
+<a class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-white transition-colors group" href="#">
+<span class="material-symbols-outlined text-slate-400 group-hover:text-primary transition-colors">settings</span>
+<span class="text-sm font-medium">Settings</span>
+</a>
+<div class="flex items-center gap-3 mt-4 px-2">
+<div class="bg-center bg-no-repeat aspect-square bg-cover rounded-full size-10 border-2 border-white dark:border-slate-800 shadow-sm" data-alt="User profile portrait" style='background-image: url("https://lh3.googleusercontent.com/aida-public/AB6AXuCyg3CBDTC9BvOsda0Qi00vr7p4R7zgzx3R8JFRKayl4Y_2-0Rcg-OuIZHrS2TJVzDmVApvBW7XTpErJ5MH7WJ3Przai3LmZjQuj7rFaeszyZJ0KfXvtHygRZ82NTj6QbJHyHNO1vtsXG43lUZ2EGXR-GSNxH193a0qC7_tphBR0uPycXd61tkYEGYh76YQHSRPtzg0H5lHHUQBdJU8KowT2ekOY-XPQwshaDKNRZLo7GZ2cvDoT0yTSW_b0UPJQend4Vc4F9hgV8E");'></div>
+<div class="flex flex-col">
+<span class="text-sm font-medium text-slate-900 dark:text-white">Alex Morgan</span>
+<span class="text-xs text-slate-500 dark:text-slate-400">Pro Plan</span>
+</div>
+</div>
+</div>
+</aside>
+<!-- Main Content -->
+<main class="flex-1 overflow-y-auto w-full">
+<div class="max-w-6xl mx-auto p-6 lg:p-10 flex flex-col gap-8">
+<!-- Header Section -->
+<div class="bg-white/70 dark:bg-slate-900/70 backdrop-blur-xl border border-white/20 dark:border-slate-700/50 rounded-2xl p-6 lg:p-8 shadow-sm flex flex-col md:flex-row justify-between items-start gap-6">
+<div class="flex flex-col gap-4 max-w-2xl">
+<div class="flex items-center gap-3 flex-wrap">
+<span class="px-2.5 py-1 bg-violet-100 dark:bg-violet-900/30 text-violet-700 dark:text-violet-300 text-xs font-bold rounded-md tracking-wide uppercase flex items-center gap-1"><span class="material-symbols-outlined text-[14px]">bolt</span> Strong Buy</span>
+<span class="px-2.5 py-1 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-xs font-medium rounded-md">Fitness</span>
+<span class="px-2.5 py-1 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-xs font-medium rounded-md font-mono">B08Y5W8T2V</span>
+</div>
+<h1 class="text-3xl lg:text-4xl font-black text-slate-900 dark:text-white leading-tight tracking-tight">Adjustable Dumbbell Set 5-52.5 lbs</h1>
+<p class="text-slate-500 dark:text-slate-400 font-medium">Brand: <span class="text-slate-900 dark:text-slate-200">FitForge</span></p>
+</div>
+<div class="flex flex-col items-end gap-4 shrink-0 w-full md:w-auto">
+<div class="flex items-center gap-4 bg-white dark:bg-slate-800 p-4 rounded-xl border border-slate-100 dark:border-slate-700 shadow-sm">
+<div class="flex flex-col items-end">
+<span class="text-slate-500 dark:text-slate-400 text-xs font-bold uppercase tracking-wider mb-1">Opportunity Score</span>
+<div class="flex items-center gap-2">
+<span class="text-4xl font-black text-slate-900 dark:text-white tracking-tighter">92</span>
+<span class="px-2 py-0.5 bg-gradient-to-r from-amber-400 to-orange-500 text-white text-xs font-bold rounded shadow-sm">S-Tier</span>
+</div>
+</div>
+<div class="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center relative">
+<svg class="w-16 h-16 transform -rotate-90 absolute" viewbox="0 0 36 36">
+<path class="text-slate-200 dark:text-slate-700" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="currentColor" stroke-width="3"></path>
+<path class="text-primary" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="currentColor" stroke-dasharray="92, 100" stroke-width="3"></path>
+</svg>
+<span class="material-symbols-outlined text-primary text-2xl absolute">trending_up</span>
+</div>
+</div>
+<button class="w-full md:w-auto px-6 py-3 bg-primary hover:bg-indigo-700 text-white text-sm font-bold rounded-lg shadow-sm shadow-indigo-500/20 transition-all flex items-center justify-center gap-2">
+<span class="material-symbols-outlined text-[18px]">forum</span>
+                                Analyze Reviews
+                            </button>
+</div>
+</div>
+<!-- 6-Stat Grid -->
+<div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+<div class="bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 rounded-xl p-5 shadow-sm hover:border-primary/30 transition-colors">
+<div class="flex items-center justify-between mb-2">
+<span class="text-slate-500 dark:text-slate-400 text-sm font-medium">Price</span>
+<span class="material-symbols-outlined text-slate-300 dark:text-slate-600 text-[18px]">payments</span>
+</div>
+<div class="text-2xl font-bold text-slate-900 dark:text-white mb-1">$199.99</div>
+<div class="text-emerald-600 dark:text-emerald-400 text-xs font-semibold flex items-center gap-1">
+<span class="material-symbols-outlined text-[14px]">arrow_upward</span> 2.5%
+                            </div>
+</div>
+<div class="bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 rounded-xl p-5 shadow-sm hover:border-primary/30 transition-colors">
+<div class="flex items-center justify-between mb-2">
+<span class="text-slate-500 dark:text-slate-400 text-sm font-medium">Rating</span>
+<span class="material-symbols-outlined text-amber-400 text-[18px]">star</span>
+</div>
+<div class="text-2xl font-bold text-slate-900 dark:text-white mb-1">4.8</div>
+<div class="text-emerald-600 dark:text-emerald-400 text-xs font-semibold flex items-center gap-1">
+<span class="material-symbols-outlined text-[14px]">arrow_upward</span> 0.1
+                            </div>
+</div>
+<div class="bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 rounded-xl p-5 shadow-sm hover:border-primary/30 transition-colors">
+<div class="flex items-center justify-between mb-2">
+<span class="text-slate-500 dark:text-slate-400 text-sm font-medium">Reviews</span>
+<span class="material-symbols-outlined text-slate-300 dark:text-slate-600 text-[18px]">reviews</span>
+</div>
+<div class="text-2xl font-bold text-slate-900 dark:text-white mb-1">1,245</div>
+<div class="text-emerald-600 dark:text-emerald-400 text-xs font-semibold flex items-center gap-1">
+<span class="material-symbols-outlined text-[14px]">arrow_upward</span> 150/mo
+                            </div>
+</div>
+<div class="bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 rounded-xl p-5 shadow-sm hover:border-primary/30 transition-colors">
+<div class="flex items-center justify-between mb-2">
+<span class="text-slate-500 dark:text-slate-400 text-sm font-medium">BSR</span>
+<span class="material-symbols-outlined text-slate-300 dark:text-slate-600 text-[18px]">leaderboard</span>
+</div>
+<div class="text-2xl font-bold text-slate-900 dark:text-white mb-1">#12</div>
+<div class="text-rose-500 dark:text-rose-400 text-xs font-semibold flex items-center gap-1">
+<span class="material-symbols-outlined text-[14px]">arrow_downward</span> 5 spots
+                            </div>
+</div>
+<div class="bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 rounded-xl p-5 shadow-sm hover:border-primary/30 transition-colors">
+<div class="flex items-center justify-between mb-2">
+<span class="text-slate-500 dark:text-slate-400 text-sm font-medium">Sales</span>
+<span class="material-symbols-outlined text-slate-300 dark:text-slate-600 text-[18px]">shopping_cart</span>
+</div>
+<div class="text-2xl font-bold text-slate-900 dark:text-white mb-1">4.5K</div>
+<div class="text-emerald-600 dark:text-emerald-400 text-xs font-semibold flex items-center gap-1">
+<span class="material-symbols-outlined text-[14px]">arrow_upward</span> 12%
+                            </div>
+</div>
+<div class="bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 rounded-xl p-5 shadow-sm hover:border-primary/30 transition-colors">
+<div class="flex items-center justify-between mb-2">
+<span class="text-slate-500 dark:text-slate-400 text-sm font-medium">Margin</span>
+<span class="material-symbols-outlined text-slate-300 dark:text-slate-600 text-[18px]">percent</span>
+</div>
+<div class="text-2xl font-bold text-slate-900 dark:text-white mb-1">35%</div>
+<div class="text-emerald-600 dark:text-emerald-400 text-xs font-semibold flex items-center gap-1">
+<span class="material-symbols-outlined text-[14px]">arrow_upward</span> 1%
+                            </div>
+</div>
+</div>
+<div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+<!-- Left Column: Breakdowns -->
+<div class="lg:col-span-1 flex flex-col gap-6">
+<!-- Score Breakdown -->
+<div class="bg-white/80 dark:bg-slate-900/80 backdrop-blur-md border border-slate-200/60 dark:border-slate-700/50 rounded-2xl p-6 shadow-sm">
+<h3 class="text-lg font-bold text-slate-900 dark:text-white mb-5 flex items-center gap-2">
+<span class="material-symbols-outlined text-primary text-[20px]">bar_chart</span>
+                                    Score Breakdown
+                                </h3>
+<div class="flex flex-col gap-5">
+<div>
+<div class="flex justify-between text-sm mb-1.5">
+<span class="font-medium text-slate-700 dark:text-slate-300">Demand</span>
+<span class="font-bold text-indigo-600 dark:text-indigo-400">95/100</span>
+</div>
+<div class="h-2 w-full bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
+<div class="h-full bg-indigo-500 rounded-full" style="width: 95%"></div>
+</div>
+</div>
+<div>
+<div class="flex justify-between text-sm mb-1.5">
+<span class="font-medium text-slate-700 dark:text-slate-300">Competition</span>
+<span class="font-bold text-violet-600 dark:text-violet-400">88/100</span>
+</div>
+<div class="h-2 w-full bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
+<div class="h-full bg-violet-500 rounded-full" style="width: 88%"></div>
+</div>
+</div>
+<div>
+<div class="flex justify-between text-sm mb-1.5">
+<span class="font-medium text-slate-700 dark:text-slate-300">Margin Potential</span>
+<span class="font-bold text-blue-600 dark:text-blue-400">90/100</span>
+</div>
+<div class="h-2 w-full bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
+<div class="h-full bg-blue-500 rounded-full" style="width: 90%"></div>
+</div>
+</div>
+<div>
+<div class="flex justify-between text-sm mb-1.5">
+<span class="font-medium text-slate-700 dark:text-slate-300">Sentiment</span>
+<span class="font-bold text-cyan-600 dark:text-cyan-400">94/100</span>
+</div>
+<div class="h-2 w-full bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
+<div class="h-full bg-cyan-500 rounded-full" style="width: 94%"></div>
+</div>
+</div>
+</div>
+</div>
+<!-- Sentiment Breakdown -->
+<div class="bg-white/80 dark:bg-slate-900/80 backdrop-blur-md border border-slate-200/60 dark:border-slate-700/50 rounded-2xl p-6 shadow-sm">
+<h3 class="text-lg font-bold text-slate-900 dark:text-white mb-5 flex items-center gap-2">
+<span class="material-symbols-outlined text-primary text-[20px]">mood</span>
+                                    Sentiment Breakdown
+                                </h3>
+<div class="flex h-6 w-full rounded-lg overflow-hidden mb-3">
+<div class="bg-emerald-500 h-full flex items-center justify-center text-[10px] font-bold text-white px-1" style="width: 75%">75%</div>
+<div class="bg-slate-300 dark:bg-slate-600 h-full flex items-center justify-center text-[10px] font-bold text-slate-700 dark:text-slate-200 px-1" style="width: 15%">15%</div>
+<div class="bg-rose-500 h-full flex items-center justify-center text-[10px] font-bold text-white px-1" style="width: 10%">10%</div>
+</div>
+<div class="flex justify-between text-xs font-medium text-slate-500 dark:text-slate-400">
+<span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-emerald-500"></span> Positive</span>
+<span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-slate-300 dark:bg-slate-600"></span> Neutral</span>
+<span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-rose-500"></span> Negative</span>
+</div>
+</div>
+<!-- Key Themes -->
+<div class="bg-white/80 dark:bg-slate-900/80 backdrop-blur-md border border-slate-200/60 dark:border-slate-700/50 rounded-2xl p-6 shadow-sm">
+<h3 class="text-lg font-bold text-slate-900 dark:text-white mb-4 flex items-center gap-2">
+<span class="material-symbols-outlined text-primary text-[20px]">label</span>
+                                    Key Themes
+                                </h3>
+<div class="flex flex-wrap gap-2">
+<span class="px-3 py-1.5 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 text-sm font-medium rounded-full border border-indigo-100 dark:border-indigo-800">Space-saving</span>
+<span class="px-3 py-1.5 bg-violet-50 dark:bg-violet-900/30 text-violet-700 dark:text-violet-300 text-sm font-medium rounded-full border border-violet-100 dark:border-violet-800">Easy adjustment</span>
+<span class="px-3 py-1.5 bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-sm font-medium rounded-full border border-slate-200 dark:border-slate-700">Durability</span>
+<span class="px-3 py-1.5 bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-sm font-medium rounded-full border border-slate-200 dark:border-slate-700">Grip comfort</span>
+<span class="px-3 py-1.5 bg-rose-50 dark:bg-rose-900/30 text-rose-700 dark:text-rose-300 text-sm font-medium rounded-full border border-rose-100 dark:border-rose-800">Dial sticking</span>
+</div>
+</div>
+</div>
+<!-- Right Column: Analysis -->
+<div class="lg:col-span-2 flex flex-col gap-6">
+<!-- Opportunity Summary -->
+<div class="bg-white dark:bg-slate-900 border-l-4 border-l-primary border-y border-r border-slate-200 dark:border-slate-800 rounded-r-xl p-6 shadow-sm">
+<h3 class="text-lg font-bold text-slate-900 dark:text-white mb-2">Opportunity Summary</h3>
+<p class="text-slate-600 dark:text-slate-300 leading-relaxed">
+                                    High demand product with excellent overall sentiment. The primary differentiator for a new entrant should focus on improving the dial switching mechanism, as 10% of negative reviews mention the dial sticking over time. There's also a significant white space for offering a stand bundle, as customers frequently buy them together but complain about separate shipping.
+                                </p>
+</div>
+<!-- Analysis Grid 2x2 -->
+<div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+<!-- Complaints -->
+<div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 shadow-sm">
+<h3 class="text-base font-bold text-slate-900 dark:text-white mb-4 flex items-center justify-between">
+                                        Top Complaints
+                                        <span class="material-symbols-outlined text-slate-400 text-[18px]">warning</span>
+</h3>
+<div class="flex flex-col gap-3">
+<div class="flex items-center justify-between p-2 hover:bg-slate-50 dark:hover:bg-slate-800/50 rounded-lg transition-colors cursor-pointer group">
+<span class="text-sm font-medium text-slate-700 dark:text-slate-300 group-hover:text-slate-900 dark:group-hover:text-white">Dial sticks after 6 months</span>
+<span class="px-2 py-0.5 bg-rose-100 dark:bg-rose-900/30 text-rose-700 dark:text-rose-400 text-[10px] font-bold rounded uppercase">High</span>
+</div>
+<div class="flex items-center justify-between p-2 hover:bg-slate-50 dark:hover:bg-slate-800/50 rounded-lg transition-colors cursor-pointer group">
+<span class="text-sm font-medium text-slate-700 dark:text-slate-300 group-hover:text-slate-900 dark:group-hover:text-white">Plates rattle slightly</span>
+<span class="px-2 py-0.5 bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400 text-[10px] font-bold rounded uppercase">Medium</span>
+</div>
+<div class="flex items-center justify-between p-2 hover:bg-slate-50 dark:hover:bg-slate-800/50 rounded-lg transition-colors cursor-pointer group">
+<span class="text-sm font-medium text-slate-700 dark:text-slate-300 group-hover:text-slate-900 dark:group-hover:text-white">Base tray feels flimsy</span>
+<span class="px-2 py-0.5 bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 text-[10px] font-bold rounded uppercase">Low</span>
+</div>
+</div>
+</div>
+<!-- Feature Requests -->
+<div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 shadow-sm">
+<h3 class="text-base font-bold text-slate-900 dark:text-white mb-4 flex items-center justify-between">
+                                        Feature Requests
+                                        <span class="material-symbols-outlined text-slate-400 text-[18px]">lightbulb</span>
+</h3>
+<div class="flex flex-col gap-3">
+<div class="flex items-center justify-between p-2 bg-slate-50 dark:bg-slate-800/50 rounded-lg border border-slate-100 dark:border-slate-800">
+<span class="text-sm font-medium text-slate-700 dark:text-slate-300">Knurled metal handle</span>
+<span class="flex items-center gap-1 text-xs font-bold text-indigo-600 dark:text-indigo-400"><span class="material-symbols-outlined text-[14px]">local_fire_department</span> High Demand</span>
+</div>
+<div class="flex items-center justify-between p-2 bg-slate-50 dark:bg-slate-800/50 rounded-lg border border-slate-100 dark:border-slate-800">
+<span class="text-sm font-medium text-slate-700 dark:text-slate-300">Heavier expansion kit</span>
+<span class="flex items-center gap-1 text-xs font-bold text-slate-500"><span class="material-symbols-outlined text-[14px]">trending_up</span> Med Demand</span>
+</div>
+<div class="flex items-center justify-between p-2 bg-slate-50 dark:bg-slate-800/50 rounded-lg border border-slate-100 dark:border-slate-800">
+<span class="text-sm font-medium text-slate-700 dark:text-slate-300">App integration</span>
+<span class="flex items-center gap-1 text-xs font-bold text-slate-400"><span class="material-symbols-outlined text-[14px]">trending_flat</span> Low Demand</span>
+</div>
+</div>
+</div>
+</div>
+<!-- Improvement Ideas -->
+<div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6 shadow-sm">
+<h3 class="text-lg font-bold text-slate-900 dark:text-white mb-4">Improvement Ideas</h3>
+<div class="flex flex-col gap-4">
+<div class="flex gap-4">
+<div class="flex-shrink-0 w-8 h-8 rounded-full bg-indigo-100 dark:bg-indigo-900/30 text-primary flex items-center justify-center font-bold text-sm">1</div>
+<div>
+<h4 class="text-sm font-bold text-slate-900 dark:text-white mb-1">Upgrade internal gears to metal</h4>
+<p class="text-sm text-slate-600 dark:text-slate-400">Solves the #1 complaint of sticking dials and allows for a "premium durability" marketing angle.</p>
+</div>
+</div>
+<div class="flex gap-4">
+<div class="flex-shrink-0 w-8 h-8 rounded-full bg-indigo-100 dark:bg-indigo-900/30 text-primary flex items-center justify-center font-bold text-sm">2</div>
+<div>
+<h4 class="text-sm font-bold text-slate-900 dark:text-white mb-1">Redesign plates to interlock securely</h4>
+<p class="text-sm text-slate-600 dark:text-slate-400">Adding a slight contour or rubberized edge could eliminate the rattling sound during lifts.</p>
+</div>
+</div>
+<div class="flex gap-4">
+<div class="flex-shrink-0 w-8 h-8 rounded-full bg-indigo-100 dark:bg-indigo-900/30 text-primary flex items-center justify-center font-bold text-sm">3</div>
+<div>
+<h4 class="text-sm font-bold text-slate-900 dark:text-white mb-1">Bundle with a custom-fit stand</h4>
+<p class="text-sm text-slate-600 dark:text-slate-400">Increases AOV and solves a common logistical complaint about ordering stands separately.</p>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</main>
+</div>
+</div>
+</body></html>

@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Amazon Product Research Dashboard</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "primary": "#493eef",
+                        "background-light": "#f6f6f8",
+                        "background-dark": "#09090b",
+                    },
+                    fontFamily: {
+                        "display": ["Inter", "sans-serif"],
+                        "mono": ["JetBrains Mono", "monospace"]
+                    },
+                    borderRadius: {"DEFAULT": "0.25rem", "lg": "0.5rem", "xl": "0.75rem", "full": "9999px"},
+                },
+            },
+        }
+    </script>
+<style>
+        .glass {
+            background: rgba(255, 255, 255, 0.03);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+        }
+        .text-gradient {
+            background: linear-gradient(to right, #4f46e5, #8b5cf6, #06b6d4);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+    </style>
+</head>
+<body class="bg-background-light dark:bg-background-dark text-slate-900 dark:text-slate-100 font-display min-h-screen">
+<div class="flex flex-col min-h-screen w-full overflow-x-hidden">
+<!-- Header -->
+<header class="flex items-center justify-between whitespace-nowrap border-b border-white/10 px-6 py-4 glass z-10 sticky top-0">
+<div class="flex items-center gap-3">
+<div class="flex items-center justify-center size-8 rounded-lg bg-primary/20 text-primary">
+<span class="material-symbols-outlined text-xl">shopping_cart</span>
+</div>
+<h1 class="text-xl font-bold tracking-tight">AmzPulse</h1>
+</div>
+<nav class="hidden md:flex items-center gap-8">
+<a class="text-sm font-medium text-slate-400 hover:text-white transition-colors" href="#">Dashboard</a>
+<a class="text-sm font-medium text-white border-b-2 border-primary pb-1" href="#">Products</a>
+<a class="text-sm font-medium text-slate-400 hover:text-white transition-colors" href="#">Analysis</a>
+<a class="text-sm font-medium text-slate-400 hover:text-white transition-colors" href="#">Settings</a>
+</nav>
+<div class="flex items-center gap-4">
+<button class="flex items-center gap-2 cursor-pointer justify-center rounded-lg h-9 px-4 bg-white/5 hover:bg-white/10 text-white text-sm font-medium transition-colors border border-white/10">
+<span class="material-symbols-outlined text-[18px]">download</span>
+<span>Export</span>
+</button>
+<div class="bg-primary/20 bg-cover rounded-full size-9 border border-white/10" data-alt="User profile avatar" style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuBIcx3DrRuFMfyq1AuFMtejT2-lVrI7DnQrVBKdEyap7053JnYyw2HTOASIWel28EW1PieDcQGwDlKS1N_fLxd6DdlqFV-RUM2-pzPQ0sPI8qA8GtUGswKwIqIrr3UXOIxZ1VH5GmD2v8vfxupxKBmEqJnoV50HtNXzEfj2j9qfDBZTCaf3CaH2nSqrcKeoFtsKUhCTHgIlNe7KutfD-tx51xUdQImUBqP_Gr6z8a0r0Noxy-DBEagai4wgKD7BTbw9cjSO-IiHtwo');"></div>
+</div>
+</header>
+<main class="flex-1 p-6 md:p-8 max-w-[1400px] mx-auto w-full flex flex-col gap-8">
+<!-- Page Title -->
+<div class="flex flex-col gap-2">
+<h2 class="text-3xl md:text-4xl font-bold tracking-tight text-gradient inline-block">Product Research</h2>
+<p class="text-slate-400 text-sm md:text-base">Analyze, compare, and discover high-performing Amazon products.</p>
+</div>
+<!-- Stats Row -->
+<div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+<div class="glass rounded-xl p-5 flex flex-col gap-3">
+<div class="flex justify-between items-start">
+<p class="text-slate-400 text-sm font-medium">Products Analyzed</p>
+<span class="material-symbols-outlined text-primary text-[20px]">analytics</span>
+</div>
+<div class="flex items-baseline gap-2">
+<p class="font-mono text-3xl font-bold text-white">10</p>
+<p class="text-emerald-400 text-xs font-medium bg-emerald-400/10 px-2 py-0.5 rounded-full flex items-center"><span class="material-symbols-outlined text-[12px]">trending_up</span> +2</p>
+</div>
+</div>
+<div class="glass rounded-xl p-5 flex flex-col gap-3">
+<div class="flex justify-between items-start">
+<p class="text-slate-400 text-sm font-medium">Average Score</p>
+<span class="material-symbols-outlined text-violet-400 text-[20px]">speed</span>
+</div>
+<div class="flex items-baseline gap-2">
+<p class="font-mono text-3xl font-bold text-white">62<span class="text-sm text-slate-500 font-normal">/100</span></p>
+<p class="text-emerald-400 text-xs font-medium bg-emerald-400/10 px-2 py-0.5 rounded-full flex items-center"><span class="material-symbols-outlined text-[12px]">trending_up</span> +5</p>
+</div>
+</div>
+<div class="glass rounded-xl p-5 flex flex-col gap-3">
+<div class="flex justify-between items-start">
+<p class="text-slate-400 text-sm font-medium">Top Tier Found</p>
+<span class="material-symbols-outlined text-amber-400 text-[20px]">workspace_premium</span>
+</div>
+<div class="flex items-baseline gap-2">
+<p class="font-mono text-3xl font-bold text-white">A</p>
+<p class="text-rose-400 text-xs font-medium bg-rose-400/10 px-2 py-0.5 rounded-full flex items-center"><span class="material-symbols-outlined text-[12px]">trending_down</span> -1</p>
+</div>
+</div>
+<div class="glass rounded-xl p-5 flex flex-col gap-3">
+<div class="flex justify-between items-start">
+<p class="text-slate-400 text-sm font-medium">Analyzed Today</p>
+<span class="material-symbols-outlined text-cyan-400 text-[20px]">today</span>
+</div>
+<div class="flex items-baseline gap-2">
+<p class="font-mono text-3xl font-bold text-white">7</p>
+<p class="text-emerald-400 text-xs font-medium bg-emerald-400/10 px-2 py-0.5 rounded-full flex items-center"><span class="material-symbols-outlined text-[12px]">trending_up</span> +3</p>
+</div>
+</div>
+</div>
+<!-- Filters & Controls -->
+<div class="glass rounded-xl p-4 flex flex-col md:flex-row gap-4 items-center justify-between">
+<div class="flex flex-1 w-full md:w-auto gap-4 items-center">
+<div class="relative w-full md:max-w-xs">
+<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-[18px]">search</span>
+<input class="w-full bg-black/20 border border-white/10 rounded-lg py-2 pl-10 pr-4 text-sm text-white placeholder:text-slate-500 focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary transition-all" placeholder="Search ASIN or keyword..." type="text"/>
+</div>
+<select class="bg-black/20 border border-white/10 rounded-lg py-2 px-3 text-sm text-white focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary transition-all appearance-none pr-8 relative">
+<option value="">All Categories</option>
+<option value="home">Home &amp; Kitchen</option>
+<option value="sports">Sports &amp; Outdoors</option>
+<option value="electronics">Electronics</option>
+</select>
+</div>
+<div class="flex bg-black/30 p-1 rounded-lg border border-white/5 w-full md:w-auto overflow-x-auto">
+<label class="cursor-pointer px-4 py-1.5 rounded-md text-sm font-medium text-slate-400 hover:text-white transition-all has-[:checked]:bg-violet-500/20 has-[:checked]:text-violet-400 has-[:checked]:shadow-sm">
+<span>S-Tier</span>
+<input class="hidden" name="tier_filter" type="radio" value="s"/>
+</label>
+<label checked="" class="cursor-pointer px-4 py-1.5 rounded-md text-sm font-medium text-slate-400 hover:text-white transition-all has-[:checked]:bg-indigo-500/20 has-[:checked]:text-indigo-400 has-[:checked]:shadow-sm">
+<span>A-Tier</span>
+<input checked="" class="hidden" name="tier_filter" type="radio" value="a"/>
+</label>
+<label class="cursor-pointer px-4 py-1.5 rounded-md text-sm font-medium text-slate-400 hover:text-white transition-all has-[:checked]:bg-blue-500/20 has-[:checked]:text-blue-400 has-[:checked]:shadow-sm">
+<span>B-Tier</span>
+<input class="hidden" name="tier_filter" type="radio" value="b"/>
+</label>
+<label class="cursor-pointer px-4 py-1.5 rounded-md text-sm font-medium text-slate-400 hover:text-white transition-all has-[:checked]:bg-amber-500/20 has-[:checked]:text-amber-400 has-[:checked]:shadow-sm">
+<span>C-Tier</span>
+<input class="hidden" name="tier_filter" type="radio" value="c"/>
+</label>
+<label class="cursor-pointer px-4 py-1.5 rounded-md text-sm font-medium text-slate-400 hover:text-white transition-all has-[:checked]:bg-rose-500/20 has-[:checked]:text-rose-400 has-[:checked]:shadow-sm">
+<span>D-Tier</span>
+<input class="hidden" name="tier_filter" type="radio" value="d"/>
+</label>
+</div>
+</div>
+<!-- Data Table -->
+<div class="glass rounded-xl overflow-hidden w-full overflow-x-auto">
+<table class="w-full text-left border-collapse">
+<thead>
+<tr class="border-b border-white/10 text-xs uppercase tracking-wider text-slate-400 bg-black/20">
+<th class="px-6 py-4 font-medium">Product Details</th>
+<th class="px-6 py-4 font-medium">ASIN</th>
+<th class="px-6 py-4 font-medium">Price</th>
+<th class="px-6 py-4 font-medium">Rating</th>
+<th class="px-6 py-4 font-medium">Score</th>
+<th class="px-6 py-4 font-medium">Status</th>
+<th class="px-6 py-4 font-medium text-right">Action</th>
+</tr>
+</thead>
+<tbody class="divide-y divide-white/5 text-sm">
+<tr class="hover:bg-white/5 transition-colors group">
+<td class="px-6 py-4">
+<div class="flex items-center gap-3">
+<div class="size-10 rounded-md bg-white/10 border border-white/5 flex-shrink-0" data-alt="Product image thumbnail" style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuBRyuFQc91bzUKyzfq-wsNxRz2C3dEBCFQLyMMhmxVqKXsaGakaukaOB03GzpdTTqxiFJp17JeUx5YGV7qGCmT7HiFOMNZujlqfPmo_Gc9uqUNsYyU4fu1OwjoEFx1ZZuZQ7E6ujYiasT0XBIvliLS_oR-DGVnyZjj9Dv4RCr1FJPsuwfT7c4PrQb8Ak09Pv_UctWdEBtPKU2_KCN-uKFGJp9lutqrI-LP26GNVOzQNr1Skysyu6csa-bdFz5aYXqj5tP_PcxZmaiw');"></div>
+<div class="flex flex-col">
+<span class="font-medium text-white line-clamp-1">Pro-Grade Stainless Steel Garlic Press</span>
+<span class="text-xs text-slate-500">Home &amp; Kitchen</span>
+</div>
+</div>
+</td>
+<td class="px-6 py-4 font-mono text-slate-400 text-xs">B08XABCD12</td>
+<td class="px-6 py-4 font-mono text-slate-300">$18.99</td>
+<td class="px-6 py-4">
+<div class="flex items-center gap-1">
+<span class="material-symbols-outlined text-amber-400 text-[14px]">star</span>
+<span class="font-mono text-slate-300">4.7</span>
+</div>
+</td>
+<td class="px-6 py-4">
+<div class="flex items-center gap-2">
+<span class="font-mono font-bold text-white">88</span>
+<span class="bg-indigo-500/20 text-indigo-400 text-[10px] font-bold px-1.5 py-0.5 rounded border border-indigo-500/30">A</span>
+</div>
+</td>
+<td class="px-6 py-4">
+<span class="inline-flex items-center gap-1.5 py-1 px-2 rounded-md bg-emerald-500/10 text-emerald-400 text-xs font-medium border border-emerald-500/20">
+<span class="size-1.5 rounded-full bg-emerald-500"></span>
+                                    Complete
+                                </span>
+</td>
+<td class="px-6 py-4 text-right">
+<button class="text-slate-400 hover:text-white transition-colors"><span class="material-symbols-outlined text-[20px]">more_vert</span></button>
+</td>
+</tr>
+<tr class="hover:bg-white/5 transition-colors group">
+<td class="px-6 py-4">
+<div class="flex items-center gap-3">
+<div class="size-10 rounded-md bg-white/10 border border-white/5 flex-shrink-0" data-alt="Product image thumbnail" style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuC6FwbB6zeDBcJNQEalb0oLW947hhGuVW-D3gEmGMjn0eSWY76-OAxIoWl0T8zkn1CBseOFGEpUBY9oeTxhzuhVDCRF4XZ8oHCxAIq_gyhnGJ86MH5y1GV-O0I9TUsaBn3YIv0xux88V7cOrGT4CrPvnfU0mtgPy41hmvxHSEoiuRxRqQvxdrrlUhEkUNIQquAFBxjZXSwivreViK-sAoBeXTKgnEAw65gloPQV7YWELnH24M7e2D48El7U9ERlwk3lWsUC65LAzsw');"></div>
+<div class="flex flex-col">
+<span class="font-medium text-white line-clamp-1">Adjustable Dumbbell Set 50lbs</span>
+<span class="text-xs text-slate-500">Sports &amp; Outdoors</span>
+</div>
+</div>
+</td>
+<td class="px-6 py-4 font-mono text-slate-400 text-xs">B09YEFGH34</td>
+<td class="px-6 py-4 font-mono text-slate-300">$149.00</td>
+<td class="px-6 py-4">
+<div class="flex items-center gap-1">
+<span class="material-symbols-outlined text-amber-400 text-[14px]">star</span>
+<span class="font-mono text-slate-300">4.5</span>
+</div>
+</td>
+<td class="px-6 py-4">
+<div class="flex items-center gap-2">
+<span class="font-mono font-bold text-white">94</span>
+<span class="bg-violet-500/20 text-violet-400 text-[10px] font-bold px-1.5 py-0.5 rounded border border-violet-500/30">S</span>
+</div>
+</td>
+<td class="px-6 py-4">
+<span class="inline-flex items-center gap-1.5 py-1 px-2 rounded-md bg-emerald-500/10 text-emerald-400 text-xs font-medium border border-emerald-500/20">
+<span class="size-1.5 rounded-full bg-emerald-500"></span>
+                                    Complete
+                                </span>
+</td>
+<td class="px-6 py-4 text-right">
+<button class="text-slate-400 hover:text-white transition-colors"><span class="material-symbols-outlined text-[20px]">more_vert</span></button>
+</td>
+</tr>
+<tr class="hover:bg-white/5 transition-colors group bg-primary/5">
+<td class="px-6 py-4">
+<div class="flex items-center gap-3">
+<div class="size-10 rounded-md bg-white/10 border border-white/5 flex-shrink-0" data-alt="Product image thumbnail" style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuDyOerasi1rLC90iiUU-jBpMnMtIg9jaAV_G2vOYQdvEZiwftLarYB_ZEhttV9IGDIHMZLYaG4oi5FWVtGNwQthI9wWrlzv2txeHreNNpqk2_B-JXEikSSSxyFErtGeYLs-X8xybIbbCUCfsrZXwzD5arvKCgkMKTZeIuhPE4wbInFBypPgoJL86ulMNrqGTFVzcnyg7zlIh3O9MDqZ-EN_4_UYxVEf0z2CUuEa3GIxtbchOxHrrD-qbWgUVBe0PAXuNjexweBxgTo');"></div>
+<div class="flex flex-col">
+<span class="font-medium text-white line-clamp-1">Wireless Noise Cancelling Earbuds</span>
+<span class="text-xs text-slate-500">Electronics</span>
+</div>
+</div>
+</td>
+<td class="px-6 py-4 font-mono text-slate-400 text-xs">B07ZIJKL56</td>
+<td class="px-6 py-4 font-mono text-slate-300">$45.50</td>
+<td class="px-6 py-4">
+<div class="flex items-center gap-1">
+<span class="material-symbols-outlined text-amber-400 text-[14px]">star_half</span>
+<span class="font-mono text-slate-300">--</span>
+</div>
+</td>
+<td class="px-6 py-4">
+<div class="flex items-center gap-2">
+<span class="font-mono text-slate-500">--</span>
+</div>
+</td>
+<td class="px-6 py-4">
+<span class="inline-flex items-center gap-1.5 py-1 px-2 rounded-md bg-primary/10 text-primary text-xs font-medium border border-primary/20">
+<span class="size-1.5 rounded-full bg-primary animate-pulse"></span>
+                                    Analyzing...
+                                </span>
+</td>
+<td class="px-6 py-4 text-right">
+<button class="text-slate-400 hover:text-white transition-colors"><span class="material-symbols-outlined text-[20px]">more_vert</span></button>
+</td>
+</tr>
+<tr class="hover:bg-white/5 transition-colors group">
+<td class="px-6 py-4">
+<div class="flex items-center gap-3">
+<div class="size-10 rounded-md bg-white/10 border border-white/5 flex-shrink-0" data-alt="Product image thumbnail" style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuB1RoUk30kjJVxx2fY2k8grqBTVzVdW79Amf8YB8ENBwUgfYiFv3M1u3nrAtYHl-1FVByd3lrR80kDtzPQWn5CQpgcQQZo7Xo_9pZFK4Ab1t4H6GLm4XhTp0_R0FIpSVayJjuEprF-euaEfWukQoJbholgen-3V08R8g4NR8EeVXEZIhZEM7Gr86U8bFfRtt-y8QGpU44D-60mhWpoYkqqC5z_yloMrohilZ4hwojWHGZ_UlvbzHcHBY_lFZj1jCo10WQOiS8w1JXQ');"></div>
+<div class="flex flex-col">
+<span class="font-medium text-white line-clamp-1">Silicone Baking Mats Set of 2</span>
+<span class="text-xs text-slate-500">Home &amp; Kitchen</span>
+</div>
+</div>
+</td>
+<td class="px-6 py-4 font-mono text-slate-400 text-xs">B06WMNO789</td>
+<td class="px-6 py-4 font-mono text-slate-300">$12.99</td>
+<td class="px-6 py-4">
+<div class="flex items-center gap-1">
+<span class="material-symbols-outlined text-amber-400 text-[14px]">star</span>
+<span class="font-mono text-slate-300">4.8</span>
+</div>
+</td>
+<td class="px-6 py-4">
+<div class="flex items-center gap-2">
+<span class="font-mono font-bold text-white">72</span>
+<span class="bg-blue-500/20 text-blue-400 text-[10px] font-bold px-1.5 py-0.5 rounded border border-blue-500/30">B</span>
+</div>
+</td>
+<td class="px-6 py-4">
+<span class="inline-flex items-center gap-1.5 py-1 px-2 rounded-md bg-emerald-500/10 text-emerald-400 text-xs font-medium border border-emerald-500/20">
+<span class="size-1.5 rounded-full bg-emerald-500"></span>
+                                    Complete
+                                </span>
+</td>
+<td class="px-6 py-4 text-right">
+<button class="text-slate-400 hover:text-white transition-colors"><span class="material-symbols-outlined text-[20px]">more_vert</span></button>
+</td>
+</tr>
+<tr class="hover:bg-white/5 transition-colors group">
+<td class="px-6 py-4">
+<div class="flex items-center gap-3">
+<div class="size-10 rounded-md bg-white/10 border border-white/5 flex-shrink-0" data-alt="Product image thumbnail" style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuCvI8uml552T0FAkaDaBzbwsrRyjipy9mRqj4PeSLzOYxOCgdD4R3GDUfi1y67CiZK95azfDjjWHsm6kfKx6Q00bYRCXx_E4DWzsEkMmAlbziggXT4E6wP5gKGgVsjXqNr2rAwqk8D-2sJ5_5RODd_OPsRvCfAbYD0umxN-bX5CG0nt41eJi37rEFwzQ3V-xHNP3Wddtm-u5SO-zp9NcPIyN7hSrml_KshOO27GMB2J_8zQkEBh5EZ9-Gamh9JKMTzv6uwQKECks2w');"></div>
+<div class="flex flex-col">
+<span class="font-medium text-white line-clamp-1">Resistance Bands Set 11pcs</span>
+<span class="text-xs text-slate-500">Sports &amp; Outdoors</span>
+</div>
+</div>
+</td>
+<td class="px-6 py-4 font-mono text-slate-400 text-xs">B05VPQR012</td>
+<td class="px-6 py-4 font-mono text-slate-300">$24.95</td>
+<td class="px-6 py-4">
+<div class="flex items-center gap-1">
+<span class="material-symbols-outlined text-amber-400 text-[14px]">star</span>
+<span class="font-mono text-slate-300">3.9</span>
+</div>
+</td>
+<td class="px-6 py-4">
+<div class="flex items-center gap-2">
+<span class="font-mono font-bold text-white">45</span>
+<span class="bg-amber-500/20 text-amber-400 text-[10px] font-bold px-1.5 py-0.5 rounded border border-amber-500/30">C</span>
+</div>
+</td>
+<td class="px-6 py-4">
+<span class="inline-flex items-center gap-1.5 py-1 px-2 rounded-md bg-emerald-500/10 text-emerald-400 text-xs font-medium border border-emerald-500/20">
+<span class="size-1.5 rounded-full bg-emerald-500"></span>
+                                    Complete
+                                </span>
+</td>
+<td class="px-6 py-4 text-right">
+<button class="text-slate-400 hover:text-white transition-colors"><span class="material-symbols-outlined text-[20px]">more_vert</span></button>
+</td>
+</tr>
+<tr class="hover:bg-white/5 transition-colors group">
+<td class="px-6 py-4">
+<div class="flex items-center gap-3">
+<div class="size-10 rounded-md bg-white/10 border border-white/5 flex-shrink-0" data-alt="Product image thumbnail" style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuAM48kEoyQk4DhRcVGb0RFqzZjeQKvzDJO2ymg1YEfBYOml2cR3fV92mjP24W5b7Or-mljihGO79p6hfCs135_U800rAgFqT62Er4BEj47Js0GPMghUYYsmNZg31JKnmaSS0zMx0J78khQKE6UMpvoJJnQSPFZR2TCKcNaoWrEeLNi_K7knahsyZjz1lWdKTRFDhIIcy4FFQ-Unpd7JtVjUBCdiR67ZsrwdD2kcs1eNmZuHBC2enQhq9Z38f-SuvB6oQt9dimappHw');"></div>
+<div class="flex flex-col">
+<span class="font-medium text-white line-clamp-1">Cheap Plastic Desk Organizer</span>
+<span class="text-xs text-slate-500">Office Products</span>
+</div>
+</div>
+</td>
+<td class="px-6 py-4 font-mono text-slate-400 text-xs">B04USTU345</td>
+<td class="px-6 py-4 font-mono text-slate-300">$8.50</td>
+<td class="px-6 py-4">
+<div class="flex items-center gap-1">
+<span class="material-symbols-outlined text-amber-400 text-[14px]">star</span>
+<span class="font-mono text-slate-300">2.1</span>
+</div>
+</td>
+<td class="px-6 py-4">
+<div class="flex items-center gap-2">
+<span class="font-mono font-bold text-white">12</span>
+<span class="bg-rose-500/20 text-rose-400 text-[10px] font-bold px-1.5 py-0.5 rounded border border-rose-500/30">D</span>
+</div>
+</td>
+<td class="px-6 py-4">
+<span class="inline-flex items-center gap-1.5 py-1 px-2 rounded-md bg-emerald-500/10 text-emerald-400 text-xs font-medium border border-emerald-500/20">
+<span class="size-1.5 rounded-full bg-emerald-500"></span>
+                                    Complete
+                                </span>
+</td>
+<td class="px-6 py-4 text-right">
+<button class="text-slate-400 hover:text-white transition-colors"><span class="material-symbols-outlined text-[20px]">more_vert</span></button>
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+</main>
+</div>
+</body></html>
