@@ -2,7 +2,7 @@
 
 import { usePathname } from "next/navigation";
 import Link from "next/link";
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 import {
   LayoutDashboard,
   Package,
@@ -16,17 +16,31 @@ import {
   Zap,
   Sun,
   Moon,
+  ChevronDown,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useTheme } from "@/components/ThemeProvider";
 
-const NAV_ITEMS = [
+type NavItem = {
+  href: string;
+  label: string;
+  icon: React.ComponentType<{ className?: string }>;
+  children?: NavItem[];
+};
+
+const NAV_ITEMS: NavItem[] = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/dashboard/products", label: "Products", icon: Package },
   { href: "/dashboard/opportunities", label: "Opportunities", icon: Trophy },
   { href: "/dashboard/suggestions", label: "Suggestions", icon: Lightbulb },
-  { href: "/dashboard/intelligence", label: "Intelligence", icon: Brain },
-  { href: "/dashboard/url-analysis", label: "URL Analysis", icon: Link2 },
+  {
+    href: "/dashboard/intelligence",
+    label: "Intelligence",
+    icon: Brain,
+    children: [
+      { href: "/dashboard/url-analysis", label: "URL Analysis", icon: Link2 },
+    ],
+  },
   { href: "/dashboard/live-data", label: "Live Data", icon: Radio },
   { href: "/dashboard/settings", label: "Settings", icon: Settings },
 ];
@@ -34,6 +48,84 @@ const NAV_ITEMS = [
 export function Sidebar() {
   const pathname = usePathname();
   const { theme, toggleTheme } = useTheme();
+
+  const renderNavItem = (item: NavItem) => {
+    const isActive =
+      item.href === "/dashboard"
+        ? pathname === "/dashboard"
+        : pathname.startsWith(item.href);
+
+    const hasChildren = item.children && item.children.length > 0;
+    const isChildActive = hasChildren && item.children!.some((c) => pathname.startsWith(c.href));
+    const isExpanded = isActive || isChildActive;
+
+    return (
+      <div key={item.href}>
+        <Link
+          href={item.href}
+          className={cn(
+            "relative flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all",
+            isActive
+              ? "text-zinc-900 dark:text-zinc-100"
+              : "text-slate-500 dark:text-zinc-500 hover:text-slate-900 dark:hover:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-800/30"
+          )}
+        >
+          {isActive && (
+            <motion.div
+              layoutId="sidebar-active"
+              className="absolute inset-0 rounded-lg bg-indigo-500/10 dark:bg-zinc-800/50 border border-indigo-500/20 dark:border-zinc-700/30"
+              transition={{ type: "spring", bounce: 0.15, duration: 0.4 }}
+            />
+          )}
+          <item.icon className={cn("h-4 w-4 relative z-10", isActive && "text-indigo-400")} />
+          <span className="relative z-10">{item.label}</span>
+          {hasChildren && (
+            <ChevronDown
+              className={cn(
+                "h-3.5 w-3.5 ml-auto relative z-10 transition-transform duration-200",
+                isExpanded && "rotate-180"
+              )}
+            />
+          )}
+        </Link>
+
+        {hasChildren && (
+          <AnimatePresence initial={false}>
+            {isExpanded && (
+              <motion.div
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: "auto", opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
+                className="overflow-hidden"
+              >
+                <div className="ml-4 pl-3 border-l border-zinc-200/50 dark:border-zinc-800/50 mt-1 space-y-0.5">
+                  {item.children!.map((child) => {
+                    const isChildItemActive = pathname.startsWith(child.href);
+                    return (
+                      <Link
+                        key={child.href}
+                        href={child.href}
+                        className={cn(
+                          "relative flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium transition-all",
+                          isChildItemActive
+                            ? "text-zinc-900 dark:text-zinc-100 bg-indigo-500/5 dark:bg-zinc-800/30"
+                            : "text-slate-500 dark:text-zinc-500 hover:text-slate-900 dark:hover:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-800/30"
+                        )}
+                      >
+                        <child.icon className={cn("h-3.5 w-3.5", isChildItemActive && "text-indigo-400")} />
+                        <span>{child.label}</span>
+                      </Link>
+                    );
+                  })}
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        )}
+      </div>
+    );
+  };
 
   return (
     <aside className="fixed inset-y-0 left-0 z-40 w-64 flex flex-col bg-[#f8f8fb] dark:bg-zinc-950/80 backdrop-blur-xl border-r border-zinc-200/50 dark:border-zinc-800/50">
@@ -63,35 +155,7 @@ export function Sidebar() {
 
       {/* Nav */}
       <nav className="flex-1 px-3 space-y-1">
-        {NAV_ITEMS.map((item) => {
-          const isActive =
-            item.href === "/dashboard"
-              ? pathname === "/dashboard"
-              : pathname.startsWith(item.href);
-
-          return (
-            <Link
-              key={item.href}
-              href={item.href}
-              className={cn(
-                "relative flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all",
-                isActive
-                  ? "text-zinc-900 dark:text-zinc-100"
-                  : "text-slate-500 dark:text-zinc-500 hover:text-slate-900 dark:hover:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-800/30"
-              )}
-            >
-              {isActive && (
-                <motion.div
-                  layoutId="sidebar-active"
-                  className="absolute inset-0 rounded-lg bg-indigo-500/10 dark:bg-zinc-800/50 border border-indigo-500/20 dark:border-zinc-700/30"
-                  transition={{ type: "spring", bounce: 0.15, duration: 0.4 }}
-                />
-              )}
-              <item.icon className={cn("h-4 w-4 relative z-10", isActive && "text-indigo-400")} />
-              <span className="relative z-10">{item.label}</span>
-            </Link>
-          );
-        })}
+        {NAV_ITEMS.map(renderNavItem)}
       </nav>
 
       {/* Bottom */}
