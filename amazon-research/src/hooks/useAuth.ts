@@ -10,6 +10,7 @@ import {
   getIdToken,
   type User,
 } from "@/lib/firebase/auth";
+import { isConfigured } from "@/lib/firebase/client";
 
 interface UseAuthReturn {
   user: User | null;
@@ -31,6 +32,10 @@ export function useAuth(): UseAuthReturn {
 
   // Listen for auth state and token changes
   useEffect(() => {
+    if (!isConfigured) {
+      setLoading(false);
+      return;
+    }
     const unsubscribe = onIdTokenChange(async (firebaseUser) => {
       setUser(firebaseUser);
       if (firebaseUser) {
