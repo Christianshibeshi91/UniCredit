@@ -21,64 +21,89 @@ export default function FollowUpsPage() {
     mutationFn: (id: number) => api.post(`/api/follow-ups/${id}/complete`),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["follow-ups"] })
-      toast.success("Marked as followed up")
+      toast.success("Engagement objective secured")
     },
   })
 
   return (
-    <div className="space-y-5">
-      <div>
-        <h2 className="text-2xl font-bold tracking-tight">Follow-ups</h2>
-        <p className="text-sm text-muted-foreground mt-0.5">{followUps.length} follow-ups due</p>
+    <div className="space-y-8 max-w-6xl">
+      <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 pb-2">
+        <div>
+          <h2 className="text-3xl font-black tracking-tight text-gradient">Engagement Tracker</h2>
+          <p className="text-muted-foreground mt-1.5 font-medium italic">Pending follow-up actions for active deployments.</p>
+        </div>
+        <div className="px-4 py-2 bg-primary/10 rounded-2xl border border-primary/20 backdrop-blur-sm">
+          <p className="text-[10px] font-black uppercase tracking-widest text-primary/60">Pending Requests</p>
+          <p className="text-xl font-black text-primary leading-none mt-1 uppercase tracking-tighter">{followUps.length} Objectives</p>
+        </div>
       </div>
 
-      <Card>
+      <Card className="border-border/40 glass-morphism shadow-xl overflow-hidden">
         <CardContent className="p-0">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b bg-muted/30">
-                <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">Title</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">Company</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">Applied</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {isLoading ? (
-                Array.from({ length: 3 }).map((_, i) => (
-                  <tr key={i} className="border-b">
-                    <td className="px-4 py-3"><div className="h-4 bg-muted rounded animate-pulse w-48" /></td>
-                    <td className="px-4 py-3"><div className="h-4 bg-muted rounded animate-pulse w-28" /></td>
-                    <td className="px-4 py-3"><div className="h-4 bg-muted rounded animate-pulse w-24" /></td>
-                    <td className="px-4 py-3"><div className="h-8 bg-muted rounded-lg animate-pulse w-32" /></td>
-                  </tr>
-                ))
-              ) : followUps.length === 0 ? (
-                <tr>
-                  <td colSpan={4} className="px-4 py-16 text-center">
-                    <div className="w-14 h-14 rounded-2xl bg-muted/50 flex items-center justify-center mx-auto mb-3">
-                      <Clock size={24} className="text-muted-foreground/40" />
-                    </div>
-                    <p className="text-sm font-medium text-muted-foreground">No follow-ups due</p>
-                    <p className="text-xs text-muted-foreground/60 mt-1">Applied jobs that need follow-up will appear here</p>
-                  </td>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-border/10 bg-muted/5">
+                  <th className="px-6 py-5 text-left text-[11px] font-black text-muted-foreground/60 uppercase tracking-widest bg-muted/10">Project / Role</th>
+                  <th className="px-6 py-5 text-left text-[11px] font-black text-muted-foreground/60 uppercase tracking-widest bg-muted/10">Organization</th>
+                  <th className="px-6 py-5 text-left text-[11px] font-black text-muted-foreground/60 uppercase tracking-widest bg-muted/10 text-center">Applied Date</th>
+                  <th className="px-6 py-5 text-right text-[11px] font-black text-muted-foreground/60 uppercase tracking-widest bg-muted/10">Action</th>
                 </tr>
-              ) : (
-                followUps.map((f) => (
-                  <tr key={f.id} className="border-b hover:bg-muted/30 transition-colors">
-                    <td className="px-4 py-3 font-medium">{f.title}</td>
-                    <td className="px-4 py-3 text-muted-foreground">{f.company}</td>
-                    <td className="px-4 py-3 text-muted-foreground text-xs tabular-nums">{f.date_logged}</td>
-                    <td className="px-4 py-3">
-                      <Button size="sm" variant="success" onClick={() => completeMutation.mutate(f.id)}>
-                        <CheckCircle size={14} /> Complete
-                      </Button>
+              </thead>
+              <tbody className="divide-y divide-border/5">
+                {isLoading ? (
+                  Array.from({ length: 3 }).map((_, i) => (
+                    <tr key={i} className="animate-pulse">
+                      <td className="px-6 py-6"><div className="h-4 bg-muted/40 rounded-full w-48" /></td>
+                      <td className="px-6 py-6"><div className="h-4 bg-muted/40 rounded-full w-28" /></td>
+                      <td className="px-6 py-6 flex justify-center"><div className="h-4 bg-muted/40 rounded-full w-24" /></td>
+                      <td className="px-6 py-6 flex justify-end"><div className="h-9 bg-muted/40 rounded-xl w-32" /></td>
+                    </tr>
+                  ))
+                ) : followUps.length === 0 ? (
+                  <tr>
+                    <td colSpan={4} className="px-6 py-24 text-center">
+                      <div className="w-20 h-20 rounded-[2.5rem] bg-muted/10 flex items-center justify-center mx-auto mb-6 border border-border/10">
+                        <Clock size={32} className="text-muted-foreground/20" />
+                      </div>
+                      <p className="text-xl font-bold text-muted-foreground/60">No Pending Objectives</p>
+                      <p className="text-xs text-muted-foreground/40 mt-2 max-w-[280px] mx-auto font-medium italic">All follow-up engagements are currently up to date. Keep deploying.</p>
                     </td>
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
+                ) : (
+                  followUps.map((f) => (
+                    <tr key={f.id} className="group hover:bg-muted/10 transition-all duration-300">
+                      <td className="px-6 py-6">
+                        <div className="font-bold text-base tracking-tight text-foreground/90 group-hover:text-primary transition-colors">{f.title}</div>
+                      </td>
+                      <td className="px-6 py-6">
+                        <div className="flex items-center gap-2">
+                          <div className="w-2 h-2 rounded-full bg-border group-hover:bg-primary/40 transition-colors" />
+                          <span className="text-muted-foreground font-semibold text-sm">{f.company}</span>
+                        </div>
+                      </td>
+                      <td className="px-6 py-6 text-center">
+                        <span className="px-3 py-1 rounded-full bg-muted/30 text-[11px] font-black tabular-nums transition-colors group-hover:bg-muted/50">
+                          {f.date_logged}
+                        </span>
+                      </td>
+                      <td className="px-6 py-6 text-right">
+                        <Button
+                          size="sm"
+                          variant="success"
+                          className="rounded-xl h-9 px-4 font-black text-[10px] uppercase tracking-widest shadow-lg shadow-emerald-500/10 opacity-80 hover:opacity-100"
+                          onClick={() => completeMutation.mutate(f.id)}
+                          loading={completeMutation.isPending && completeMutation.variables === f.id}
+                        >
+                          <CheckCircle size={14} className="mr-1.5" /> Secure Objective
+                        </Button>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
         </CardContent>
       </Card>
     </div>

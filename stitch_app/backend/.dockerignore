@@ -1,0 +1,33 @@
+# Dependencies — installed fresh in Docker build
+node_modules
+npm-debug.log*
+
+# Environment files — secrets injected via env vars at runtime
+.env
+.env.*
+!.env.example
+
+# Git
+.git
+.gitignore
+
+# IDE / Editor
+.vscode
+.idea
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Test and docs
+tests/
+docs/
+*.md
+!README.md
+
+# Build artifacts
+dist/
+build/
+coverage/

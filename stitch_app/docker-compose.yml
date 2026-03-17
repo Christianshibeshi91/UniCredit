@@ -1,0 +1,81 @@
+version: "3.8"
+
+services:
+  # ─── Backend API ────────────────────────────────────────────────────────
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: stitch-api
+    restart: unless-stopped
+    ports:
+      - "${API_PORT:-3000}:3000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - REDIS_URL=redis://redis:6379
+      # Secrets — must be provided via .env file or CI/CD secrets
+      - JWT_SECRET=${JWT_SECRET}
+      - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY}
+      - STRIPE_WEBHOOK_SECRET=${STRIPE_WEBHOOK_SECRET}
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+      - FIREBASE_PROJECT_ID=${FIREBASE_PROJECT_ID}
+      - FIREBASE_CLIENT_EMAIL=${FIREBASE_CLIENT_EMAIL}
+      - FIREBASE_PRIVATE_KEY=${FIREBASE_PRIVATE_KEY}
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-http://localhost:8080}
+      - SENDGRID_API_KEY=${SENDGRID_API_KEY:-}
+      - SENTRY_DSN=${SENTRY_DSN:-}
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - stitch-network
+
+  # ─── Redis (rate limiting, sessions, job queues) ────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: stitch-redis
+    restart: unless-stopped
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    command: >
+      redis-server
+      --maxmemory 128mb
+      --maxmemory-policy allkeys-lru
+      --appendonly yes
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks:
+      - stitch-network
+
+  # ─── Firebase Emulator (optional, for local dev) ────────────────────────
+  # Uncomment to use Firebase Emulator Suite locally
+  # firestore-emulator:
+  #   image: gcr.io/google.com/cloudsdktool/cloud-sdk:emulators
+  #   container_name: stitch-firestore-emulator
+  #   ports:
+  #     - "8081:8081"
+  #   command: >
+  #     gcloud emulators firestore start
+  #     --host-port=0.0.0.0:8081
+  #   networks:
+  #     - stitch-network
+
+volumes:
+  redis-data:
+    driver: local
+
+networks:
+  stitch-network:
+    driver: bridge

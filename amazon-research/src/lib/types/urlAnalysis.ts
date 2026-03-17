@@ -563,7 +563,7 @@ export interface URLAnalysisReport {
   ppcKeywords: PPCKeywordResult;
   pricingStrategy: PricingStrategyResult;
   actionPlan: URLActionPlan;
-  claudeModel: "claude-opus-4-6";
+  claudeModel: string;
   tokenUsage: URLAnalysisTokenUsage;
   processingTimeMs: number;
   createdAt: string;
@@ -614,7 +614,7 @@ export interface ComparisonReport {
   bestInClassByDimension: Record<string, string>;
   combinedActionPlan: string;
   sourcingRecommendation: string;
-  claudeModel: "claude-opus-4-6";
+  claudeModel: string;
   createdAt: string;
 }
 

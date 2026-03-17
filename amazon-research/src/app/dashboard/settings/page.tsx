@@ -140,30 +140,26 @@ export default function SettingsPage() {
         </p>
       </motion.div>
 
-      {/* API Keys */}
+      {/* Ollama Configuration */}
       <SettingSection
         icon={Key}
-        title="API Configuration"
-        description="Manage your API keys and service connections"
+        title="Ollama Configuration"
+        description="Local LLM server for AI-powered product analysis"
         iconColor="text-amber-400"
         delay={0.05}
       >
         <div className="space-y-4">
           <div>
             <label className="text-xs text-zinc-500 dark:text-zinc-400 mb-1.5 block">
-              Anthropic API Key
+              Ollama Server URL
             </label>
-            <div className="flex gap-2">
-              <input
-                type="password"
-                value="sk-ant-••••••••••••••••••••••••"
-                readOnly
-                className="flex-1 rounded-lg bg-zinc-100/80 dark:bg-zinc-800/80 border border-zinc-300/50 dark:border-zinc-700/50 px-3 py-2 text-sm text-zinc-700 dark:text-zinc-300 font-mono focus:outline-none focus:ring-1 focus:ring-indigo-500/50"
-              />
-              <button className="px-3 py-2 rounded-lg bg-zinc-100 dark:bg-zinc-800 text-xs text-zinc-600 dark:text-zinc-400 hover:text-zinc-800 dark:hover:text-zinc-200 transition-colors border border-zinc-300/50 dark:border-zinc-700/50">
-                Change
-              </button>
-            </div>
+            <input
+              type="text"
+              value="http://localhost:11434"
+              readOnly
+              className="w-full rounded-lg bg-zinc-100/80 dark:bg-zinc-800/80 border border-zinc-300/50 dark:border-zinc-700/50 px-3 py-2 text-sm text-zinc-700 dark:text-zinc-300 font-mono focus:outline-none focus:ring-1 focus:ring-indigo-500/50"
+            />
+            <p className="text-[10px] text-zinc-500 mt-1">Configured via OLLAMA_BASE_URL environment variable</p>
           </div>
           <div>
             <label className="text-xs text-zinc-500 dark:text-zinc-400 mb-1.5 block">
@@ -171,7 +167,7 @@ export default function SettingsPage() {
             </label>
             <input
               type="text"
-              value="amazon-research-prod"
+              value="reasearch-3283a"
               readOnly
               className="w-full rounded-lg bg-zinc-100/80 dark:bg-zinc-800/80 border border-zinc-300/50 dark:border-zinc-700/50 px-3 py-2 text-sm text-zinc-700 dark:text-zinc-300 font-mono focus:outline-none focus:ring-1 focus:ring-indigo-500/50"
             />

@@ -4,6 +4,9 @@ import 'package:provider/provider.dart';
 
 import '../services/app_state.dart';
 import '../services/api_service.dart';
+import '../theme/app_theme.dart';
+import '../components/loading_button.dart';
+import 'password_reset_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -29,10 +32,18 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Future<void> _handleChangePassword() async {
     if (_currentPassCtrl.text.isEmpty || _newPassCtrl.text.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please fill in both fields'), backgroundColor: Color(0xFFDC2626)),
+        AppWidgets.errorSnackBar('Please fill in both password fields'),
       );
       return;
     }
+    if (_newPassCtrl.text.length < 8) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        AppWidgets.errorSnackBar(
+            'New password must be at least 8 characters'),
+      );
+      return;
+    }
+
     setState(() => _savingPassword = true);
     try {
       final result = await ApiService.changePassword(
@@ -44,17 +55,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
         _currentPassCtrl.clear();
         _newPassCtrl.clear();
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Password updated!'), backgroundColor: Color(0xFF16A34A)),
+          AppWidgets.successSnackBar('Password updated successfully!'),
         );
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(result['error'] ?? 'Failed'), backgroundColor: const Color(0xFFDC2626)),
+          AppWidgets.errorSnackBar(result['error'] ?? 'Failed to update'),
         );
       }
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Something went wrong. Please try again.'), backgroundColor: Color(0xFFDC2626)),
+        AppWidgets.errorSnackBar('Something went wrong. Please try again.'),
       );
     } finally {
       if (mounted) setState(() => _savingPassword = false);
@@ -64,7 +75,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF6F6F8),
+      backgroundColor: AppColors.background,
       body: SafeArea(
         child: Column(
           children: [
@@ -97,26 +108,23 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   Widget _buildTopBar(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+      padding: const EdgeInsets.fromLTRB(
+          AppSpacing.pagePadding, AppSpacing.headerTop, AppSpacing.pagePadding, 0),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           const SizedBox(width: 38),
-          Text('Profile & Settings',
-              style: GoogleFonts.manrope(
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
-                  color: const Color(0xFF0F172A))),
+          Text('Profile & Settings', style: AppTextStyles.screenTitle),
           Container(
             width: 38,
             height: 38,
             decoration: BoxDecoration(
-              color: Colors.white,
+              color: AppColors.surface,
               shape: BoxShape.circle,
-              border: Border.all(color: const Color(0xFFE2E8F0)),
+              border: Border.all(color: AppColors.border),
             ),
             child: const Icon(Icons.more_horiz,
-                size: 18, color: Color(0xFF64748B)),
+                size: 18, color: AppColors.textSecondary),
           ),
         ],
       ),
@@ -133,30 +141,36 @@ class _ProfileScreenState extends State<ProfileScreen> {
             alignment: Alignment.bottomRight,
             children: [
               Container(
-                width: 88,
-                height: 88,
+                width: AppSizes.avatarLarge,
+                height: AppSizes.avatarLarge,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  color: const Color(0xFF135BEC),
+                  gradient: const LinearGradient(
+                      colors: AppColors.primaryGradient),
                   border: Border.all(
-                      color: const Color(0xFF135BEC).withValues(alpha: 0.3),
-                      width: 3),
+                    color: AppColors.primary.withValues(alpha: 0.2),
+                    width: 3,
+                  ),
                 ),
                 child: Center(
                   child: Text(
-                    appState.userName.isNotEmpty ? appState.userName[0].toUpperCase() : '?',
-                    style: GoogleFonts.manrope(
-                        color: Colors.white,
-                        fontSize: 36,
-                        fontWeight: FontWeight.bold),
+                    appState.userName.isNotEmpty
+                        ? appState.userName[0].toUpperCase()
+                        : '?',
+                    style: GoogleFonts.plusJakartaSans(
+                      color: Colors.white,
+                      fontSize: 36,
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
                 ),
               ),
               Container(
-                width: 28,
-                height: 28,
+                width: 30,
+                height: 30,
                 decoration: BoxDecoration(
-                  color: const Color(0xFF135BEC),
+                  gradient: const LinearGradient(
+                      colors: AppColors.accentGradient),
                   shape: BoxShape.circle,
                   border: Border.all(color: Colors.white, width: 2),
                 ),
@@ -166,12 +180,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             ],
           ),
           const SizedBox(height: 14),
-          Text(appState.userName,
-              style: GoogleFonts.manrope(
-                  fontSize: 22,
-                  fontWeight: FontWeight.w800,
-                  color: const Color(0xFF0F172A),
-                  letterSpacing: -0.5)),
+          Text(appState.userName, style: AppTextStyles.h2),
           const SizedBox(height: 8),
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
@@ -181,20 +190,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
                 decoration: BoxDecoration(
                   gradient: const LinearGradient(
-                      colors: [Color(0xFF7C3AED), Color(0xFF4F46E5)]),
-                  borderRadius: BorderRadius.circular(20),
+                      colors: AppColors.primaryGradient),
+                  borderRadius: BorderRadius.circular(AppRadius.chip),
                 ),
-                child: Text(appState.tier,
-                    style: GoogleFonts.manrope(
-                        fontSize: 10,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.white,
-                        letterSpacing: 0.5)),
+                child: Text(appState.tier, style: AppTextStyles.tierBadge),
               ),
               const SizedBox(width: 10),
-              Text(appState.userEmail,
-                  style: GoogleFonts.manrope(
-                      fontSize: 11, color: const Color(0xFF64748B))),
+              Text(appState.userEmail, style: AppTextStyles.caption),
             ],
           ),
         ],
@@ -203,30 +205,26 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Widget _buildAccountInfo() {
+    final appState = Provider.of<AppState>(context, listen: false);
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20),
+      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.pagePadding),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('ACCOUNT INFORMATION',
-              style: GoogleFonts.manrope(
-                  fontSize: 10,
-                  fontWeight: FontWeight.bold,
-                  color: const Color(0xFF94A3B8),
-                  letterSpacing: 0.8)),
+          Text('ACCOUNT INFORMATION', style: AppTextStyles.sectionLabel),
           const SizedBox(height: 10),
           Container(
             decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: const Color(0xFFF1F5F9)),
+              color: AppColors.surface,
+              borderRadius: BorderRadius.circular(AppRadius.lg),
+              border: Border.all(color: AppColors.surfaceBorder),
             ),
             child: Column(
               children: [
-                _buildInfoRow(label: 'FULL NAME', value: Provider.of<AppState>(context, listen: false).userName),
-                const Divider(height: 1, color: Color(0xFFF1F5F9)),
+                _buildInfoRow(label: 'FULL NAME', value: appState.userName),
+                const Divider(height: 1, color: AppColors.surfaceBorder),
                 _buildInfoRow(
-                    label: 'EMAIL ADDRESS', value: Provider.of<AppState>(context, listen: false).userEmail),
+                    label: 'EMAIL ADDRESS', value: appState.userEmail),
               ],
             ),
           ),
@@ -244,21 +242,20 @@ class _ProfileScreenState extends State<ProfileScreen> {
           Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(label,
-                  style: GoogleFonts.manrope(
-                      fontSize: 10,
-                      fontWeight: FontWeight.bold,
-                      color: const Color(0xFF94A3B8),
-                      letterSpacing: 0.5)),
+              Text(label, style: AppTextStyles.sectionLabel),
               const SizedBox(height: 4),
-              Text(value,
-                  style: GoogleFonts.manrope(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600,
-                      color: const Color(0xFF0F172A))),
+              Text(
+                value,
+                style: GoogleFonts.plusJakartaSans(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.textPrimary,
+                ),
+              ),
             ],
           ),
-          const Icon(Icons.chevron_right, color: Color(0xFFCBD5E1), size: 20),
+          const Icon(Icons.chevron_right,
+              color: AppColors.textHint, size: 20),
         ],
       ),
     );
@@ -266,56 +263,59 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   Widget _buildSecuritySection() {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20),
+      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.pagePadding),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('SECURITY & PRIVACY',
-              style: GoogleFonts.manrope(
-                  fontSize: 10,
-                  fontWeight: FontWeight.bold,
-                  color: const Color(0xFF94A3B8),
-                  letterSpacing: 0.8)),
+          Text('SECURITY & PRIVACY', style: AppTextStyles.sectionLabel),
           const SizedBox(height: 10),
           Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: const Color(0xFFF1F5F9)),
+              color: AppColors.surface,
+              borderRadius: BorderRadius.circular(AppRadius.lg),
+              border: Border.all(color: AppColors.surfaceBorder),
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('UPDATE PASSWORD',
-                    style: GoogleFonts.manrope(
-                        fontSize: 11,
-                        fontWeight: FontWeight.bold,
-                        color: const Color(0xFF64748B),
-                        letterSpacing: 0.5)),
+                Text(
+                  'UPDATE PASSWORD',
+                  style: AppTextStyles.sectionLabel.copyWith(
+                    color: AppColors.textSecondary,
+                  ),
+                ),
                 const SizedBox(height: 12),
                 _buildPasswordField(
-                    hint: 'Current Password', icon: Icons.lock_outline, controller: _currentPassCtrl),
+                  hint: 'Current Password',
+                  icon: Icons.lock_outline,
+                  controller: _currentPassCtrl,
+                ),
                 const SizedBox(height: 10),
                 _buildPasswordField(
-                    hint: 'New Password', icon: Icons.lock_reset_outlined, controller: _newPassCtrl),
+                  hint: 'New Password',
+                  icon: Icons.lock_reset_outlined,
+                  controller: _newPassCtrl,
+                ),
                 const SizedBox(height: 16),
-                SizedBox(
-                  width: double.infinity,
+                LoadingButton(
+                  label: 'Save Changes',
+                  onPressed: _handleChangePassword,
+                  isLoading: _savingPassword,
+                  gradient: AppColors.primaryGradient,
                   height: 46,
-                  child: ElevatedButton(
-                    onPressed: _savingPassword ? null : _handleChangePassword,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF7C3AED),
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12)),
-                      elevation: 0,
+                ),
+                const SizedBox(height: 12),
+                Center(
+                  child: GestureDetector(
+                    onTap: () => Navigator.of(context).push(
+                      MaterialPageRoute(
+                          builder: (_) => const PasswordResetScreen()),
                     ),
-                    child: Text('Save Changes',
-                        style: GoogleFonts.manrope(
-                            fontSize: 14,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.white)),
+                    child: Text(
+                      'Forgot your password?',
+                      style: AppTextStyles.link.copyWith(fontSize: 13),
+                    ),
                   ),
                 ),
               ],
@@ -326,23 +326,27 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  Widget _buildPasswordField({required String hint, required IconData icon, TextEditingController? controller}) {
+  Widget _buildPasswordField({
+    required String hint,
+    required IconData icon,
+    TextEditingController? controller,
+  }) {
     return Container(
       decoration: BoxDecoration(
-        color: const Color(0xFFF8FAFC),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: const Color(0xFFE2E8F0)),
+        color: AppColors.surfaceElevated,
+        borderRadius: BorderRadius.circular(AppRadius.md),
+        border: Border.all(color: AppColors.border),
       ),
       child: TextField(
         controller: controller,
         obscureText: true,
-        style:
-            GoogleFonts.manrope(fontSize: 13, color: const Color(0xFF0F172A)),
+        style: GoogleFonts.dmSans(fontSize: 13, color: AppColors.textPrimary),
         decoration: InputDecoration(
-          prefixIcon: Icon(icon, color: const Color(0xFF94A3B8), size: 18),
+          prefixIcon:
+              Icon(icon, color: AppColors.textTertiary, size: 18),
           hintText: hint,
           hintStyle:
-              GoogleFonts.manrope(fontSize: 13, color: const Color(0xFFCBD5E1)),
+              GoogleFonts.dmSans(fontSize: 13, color: AppColors.textHint),
           border: InputBorder.none,
           contentPadding:
               const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
@@ -353,39 +357,34 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   Widget _buildPreferences() {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20),
+      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.pagePadding),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('PREFERENCES',
-              style: GoogleFonts.manrope(
-                  fontSize: 10,
-                  fontWeight: FontWeight.bold,
-                  color: const Color(0xFF94A3B8),
-                  letterSpacing: 0.8)),
+          Text('PREFERENCES', style: AppTextStyles.sectionLabel),
           const SizedBox(height: 10),
           Container(
             decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: const Color(0xFFF1F5F9)),
+              color: AppColors.surface,
+              borderRadius: BorderRadius.circular(AppRadius.lg),
+              border: Border.all(color: AppColors.surfaceBorder),
             ),
             child: Column(
               children: [
                 _buildPreferenceRow(
                   icon: Icons.fingerprint,
-                  iconColor: const Color(0xFF135BEC),
+                  iconColor: AppColors.primary,
                   title: 'Biometric Login',
                   subtitle: 'Facial Passkey',
                   value: _biometricLogin,
                   onChanged: (v) => setState(() => _biometricLogin = v),
                 ),
-                const Divider(height: 1, color: Color(0xFFF1F5F9)),
+                const Divider(height: 1, color: AppColors.surfaceBorder),
                 _buildPreferenceRow(
                   icon: Icons.notifications_outlined,
-                  iconColor: const Color(0xFFF59E0B),
+                  iconColor: AppColors.warning,
                   title: 'Smart Alerts',
-                  subtitle: 'Real-time trading updates',
+                  subtitle: 'Real-time updates',
                   value: _smartAlerts,
                   onChanged: (v) => setState(() => _smartAlerts = v),
                 ),
@@ -397,23 +396,25 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  Widget _buildPreferenceRow(
-      {required IconData icon,
-      required Color iconColor,
-      required String title,
-      required String subtitle,
-      required bool value,
-      required ValueChanged<bool> onChanged}) {
+  Widget _buildPreferenceRow({
+    required IconData icon,
+    required Color iconColor,
+    required String title,
+    required String subtitle,
+    required bool value,
+    required ValueChanged<bool> onChanged,
+  }) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
       child: Row(
         children: [
           Container(
-            width: 38,
-            height: 38,
+            width: 40,
+            height: 40,
             decoration: BoxDecoration(
-                color: iconColor.withValues(alpha: 0.1),
-                borderRadius: BorderRadius.circular(10)),
+              color: iconColor.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(AppRadius.md),
+            ),
             child: Icon(icon, color: iconColor, size: 20),
           ),
           const SizedBox(width: 12),
@@ -421,22 +422,23 @@ class _ProfileScreenState extends State<ProfileScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(title,
-                    style: GoogleFonts.manrope(
-                        fontSize: 13,
-                        fontWeight: FontWeight.bold,
-                        color: const Color(0xFF0F172A))),
-                Text(subtitle,
-                    style: GoogleFonts.manrope(
-                        fontSize: 11, color: const Color(0xFF64748B))),
+                Text(
+                  title,
+                  style: GoogleFonts.plusJakartaSans(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.textPrimary,
+                  ),
+                ),
+                Text(subtitle, style: AppTextStyles.caption),
               ],
             ),
           ),
           Switch(
-              value: value,
-              onChanged: onChanged,
-              activeThumbColor: const Color(0xFF135BEC),
-              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap),
+            value: value,
+            onChanged: onChanged,
+            materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          ),
         ],
       ),
     );
@@ -444,35 +446,38 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   Widget _buildSignOut(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20),
+      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.pagePadding),
       child: GestureDetector(
         onTap: () {
           showDialog(
             context: context,
-            builder: (_) => AlertDialog(
+            builder: (ctx) => AlertDialog(
               shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(16)),
-              title: Text('Sign Out',
-                  style: GoogleFonts.manrope(fontWeight: FontWeight.bold)),
-              content: Text('Are you sure you want to sign out?',
-                  style: GoogleFonts.manrope(
-                      fontSize: 14, color: const Color(0xFF64748B))),
+                  borderRadius: BorderRadius.circular(AppRadius.xl)),
+              title: Text('Sign Out', style: AppTextStyles.h3),
+              content: Text(
+                'Are you sure you want to sign out?',
+                style: AppTextStyles.bodySmall,
+              ),
               actions: [
                 TextButton(
-                  onPressed: () => Navigator.pop(context),
+                  onPressed: () => Navigator.pop(ctx),
                   child: Text('Cancel',
-                      style:
-                          GoogleFonts.manrope(color: const Color(0xFF64748B))),
+                      style: AppTextStyles.bodyMedium
+                          .copyWith(color: AppColors.textSecondary)),
                 ),
                 TextButton(
                   onPressed: () {
-                    Navigator.pop(context);
+                    Navigator.pop(ctx);
                     Provider.of<AppState>(context, listen: false).logout();
                   },
-                  child: Text('Sign Out',
-                      style: GoogleFonts.manrope(
-                          color: const Color(0xFFDC2626),
-                          fontWeight: FontWeight.bold)),
+                  child: Text(
+                    'Sign Out',
+                    style: GoogleFonts.plusJakartaSans(
+                      color: AppColors.error,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
                 ),
               ],
             ),
@@ -482,13 +487,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             const Icon(Icons.logout_rounded,
-                color: Color(0xFF64748B), size: 17),
+                color: AppColors.textSecondary, size: 18),
             const SizedBox(width: 6),
-            Text('Sign Out',
-                style: GoogleFonts.manrope(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                    color: const Color(0xFF64748B))),
+            Text(
+              'Sign Out',
+              style: GoogleFonts.plusJakartaSans(
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+                color: AppColors.textSecondary,
+              ),
+            ),
           ],
         ),
       ),
@@ -498,16 +506,23 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Widget _buildFooter() {
     return Column(
       children: [
-        Text('FINTOUCH ULTIMATE',
-            style: GoogleFonts.manrope(
-                fontSize: 10,
-                fontWeight: FontWeight.bold,
-                color: const Color(0xFFCBD5E1),
-                letterSpacing: 1)),
+        Text(
+          'STITCH',
+          style: GoogleFonts.plusJakartaSans(
+            fontSize: 10,
+            fontWeight: FontWeight.w800,
+            color: AppColors.textHint,
+            letterSpacing: 2,
+          ),
+        ),
         const SizedBox(height: 4),
-        Text('v2.4.1',
-            style: GoogleFonts.manrope(
-                fontSize: 10, color: const Color(0xFFE2E8F0))),
+        Text(
+          'v3.0.0',
+          style: GoogleFonts.dmSans(
+            fontSize: 10,
+            color: AppColors.textHint,
+          ),
+        ),
       ],
     );
   }

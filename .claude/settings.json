@@ -18,7 +18,11 @@
       "Bash(ssh SC_Local@10.0.0.200 \"powershell -Command \"\"Register-ScheduledTask -TaskName ''JobScheduler'' -Action \\(New-ScheduledTaskAction -Execute ''C:\\\\Python312\\\\python.exe'' -Argument ''C:\\\\Users\\\\SC_Local\\\\Anti-gravity\\\\start_scheduler.py'' -WorkingDirectory ''C:\\\\Users\\\\SC_Local\\\\Anti-gravity''\\) -Trigger \\(New-ScheduledTaskTrigger -AtStartup\\) -Settings \\(New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -RestartCount 3 -RestartInterval \\(New-TimeSpan -Minutes 1\\)\\) -Principal \\(New-ScheduledTaskPrincipal -UserId ''SC_Local'' -LogonType S4U -RunLevel Highest\\) -Force\"\"\")",
       "Bash(ssh SC_Local@10.0.0.200 \"cd C:\\\\Users\\\\SC_Local\\\\Anti-gravity && C:\\\\Python312\\\\python.exe -c \"\"import sys; sys.path.insert\\(0, r''C:\\\\Users\\\\SC_Local\\\\Anti-gravity''\\); sys.path.insert\\(0, r''C:\\\\Users\\\\SC_Local\\\\Anti-gravity\\\\LinkedinAutomation''\\); from dotenv import load_dotenv; load_dotenv\\(\\); from LinkedinAutomation.telegram_bot import run_bot; print\\(''telegram OK''\\)\"\"\")",
       "Bash(ssh SC_Local@10.0.0.200 \"powershell -Command \"\"Start-Process -FilePath ''C:\\\\Python312\\\\python.exe'' -ArgumentList ''C:\\\\Users\\\\SC_Local\\\\Anti-gravity\\\\start_telegram.py'' -WorkingDirectory ''C:\\\\Users\\\\SC_Local\\\\Anti-gravity'' -WindowStyle Hidden -RedirectStandardError ''C:\\\\Users\\\\SC_Local\\\\Anti-gravity\\\\.tmp\\\\telegram_err.log'' -RedirectStandardOutput ''C:\\\\Users\\\\SC_Local\\\\Anti-gravity\\\\.tmp\\\\telegram_out.log''\"\"\")",
-      "Bash(ssh SC_Local@10.0.0.200 \"powershell -Command \"\"Set-Content -Path ''C:\\\\Users\\\\SC_Local\\\\Anti-gravity\\\\start_all.bat'' -Value ''cd /d C:\\\\Users\\\\SC_Local\\\\Anti-gravity\\\\r\\\\nstart /b C:\\\\Python312\\\\python.exe start_telegram.py > .tmp\\\\telegram.log 2>&1\\\\r\\\\nstart /b C:\\\\Python312\\\\python.exe start_scheduler.py > .tmp\\\\scheduler.log 2>&1\\\\r\\\\n''\"\"\")"
+      "Bash(ssh SC_Local@10.0.0.200 \"powershell -Command \"\"Set-Content -Path ''C:\\\\Users\\\\SC_Local\\\\Anti-gravity\\\\start_all.bat'' -Value ''cd /d C:\\\\Users\\\\SC_Local\\\\Anti-gravity\\\\r\\\\nstart /b C:\\\\Python312\\\\python.exe start_telegram.py > .tmp\\\\telegram.log 2>&1\\\\r\\\\nstart /b C:\\\\Python312\\\\python.exe start_scheduler.py > .tmp\\\\scheduler.log 2>&1\\\\r\\\\n''\"\"\")",
+      "mcp__stitch__create_project",
+      "mcp__stitch__generate_screen_from_text",
+      "mcp__stitch__get_screen",
+      "mcp__stitch__list_screens"
     ]
   }
 }

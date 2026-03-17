@@ -11,6 +11,8 @@ GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 if not GEMINI_API_KEY:
     raise RuntimeError("GEMINI_API_KEY is required in .env")
 
+MANUS_API_KEY = os.environ.get("MANUS_API_KEY", "")
+
 HOST = os.environ.get("TECH_TUTOR_HOST", "0.0.0.0")
 PORT = int(os.environ.get("TECH_TUTOR_PORT", "8101"))
 FRONTEND_URL = os.environ.get("TECH_TUTOR_FRONTEND_URL", "http://localhost:5174")

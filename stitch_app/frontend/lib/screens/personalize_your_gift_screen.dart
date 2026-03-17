@@ -1,13 +1,14 @@
-import 'dart:async';
-import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
-import 'package:record/record.dart';
 
 import '../services/app_state.dart';
 import '../services/api_service.dart';
+import '../theme/app_theme.dart';
+import '../components/occasion_grid.dart';
+import '../components/media_capture.dart';
+import '../components/loading_button.dart';
+import '../components/error_banner.dart';
 
 class PersonalizeYourGiftScreen extends StatefulWidget {
   const PersonalizeYourGiftScreen({super.key});
@@ -18,6 +19,7 @@ class PersonalizeYourGiftScreen extends StatefulWidget {
 }
 
 class _PersonalizeYourGiftScreenState extends State<PersonalizeYourGiftScreen> {
+  int _step = 0; // 0-4: recipient, occasion, amount, media, message
   String _selectedOccasion = 'Birthday';
   final _recipientController = TextEditingController();
   final _amountController = TextEditingController();
@@ -26,72 +28,18 @@ class _PersonalizeYourGiftScreenState extends State<PersonalizeYourGiftScreen> {
   final _customOccasionController = TextEditingController();
   final _customOccasionFocus = FocusNode();
   bool _isSending = false;
+  String? _error;
 
-  // Video & Audio state
-  String? _videoFileName;
-  String? _audioFileName;
-  bool _isRecordingAudio = false;
-  int _audioSeconds = 0;
-  Timer? _audioTimer;
-  final AudioRecorder _audioRecorder = AudioRecorder();
-
-  final List<Map<String, dynamic>> _occasions = [
-    {
-      'label': 'Birthday',
-      'icon': Icons.cake_outlined,
-      'gradient': [const Color(0xFFEC4899), const Color(0xFFBE185D)]
-    },
-    {
-      'label': 'Wedding',
-      'icon': Icons.favorite_outline,
-      'gradient': [const Color(0xFFF97316), const Color(0xFFEA580C)]
-    },
-    {
-      'label': 'Graduation',
-      'icon': Icons.school_outlined,
-      'gradient': [const Color(0xFF6366F1), const Color(0xFF4338CA)]
-    },
-    {
-      'label': 'Anniversary',
-      'icon': Icons.diamond_outlined,
-      'gradient': [const Color(0xFFE11D48), const Color(0xFF9F1239)]
-    },
-    {
-      'label': 'Holiday',
-      'icon': Icons.celebration_outlined,
-      'gradient': [const Color(0xFF10B981), const Color(0xFF047857)]
-    },
-    {
-      'label': 'New Baby',
-      'icon': Icons.child_care_outlined,
-      'gradient': [const Color(0xFF06B6D4), const Color(0xFF0891B2)]
-    },
-    {
-      'label': 'Farewell',
-      'icon': Icons.flight_takeoff_outlined,
-      'gradient': [const Color(0xFF8B5CF6), const Color(0xFF6D28D9)]
-    },
-    {
-      'label': 'Congrats',
-      'icon': Icons.emoji_events_outlined,
-      'gradient': [const Color(0xFFF59E0B), const Color(0xFFD97706)]
-    },
-    {
-      'label': 'Thank You',
-      'icon': Icons.volunteer_activism_outlined,
-      'gradient': [const Color(0xFF14B8A6), const Color(0xFF0D9488)]
-    },
-    {
-      'label': 'Other',
-      'icon': Icons.auto_awesome_outlined,
-      'gradient': [const Color(0xFF64748B), const Color(0xFF475569)]
-    },
+  static const _stepLabels = [
+    'Who is it for?',
+    'Choose an occasion',
+    'Set the amount',
+    'Add a personal touch',
+    'Write your message',
   ];
 
   @override
   void dispose() {
-    _audioTimer?.cancel();
-    _audioRecorder.dispose();
     _recipientController.dispose();
     _amountController.dispose();
     _messageController.dispose();
@@ -101,423 +49,42 @@ class _PersonalizeYourGiftScreenState extends State<PersonalizeYourGiftScreen> {
     super.dispose();
   }
 
-  Future<void> _handleRecordVideo() async {
-    final scaffold = ScaffoldMessenger.of(context);
-    try {
-      final picker = ImagePicker();
-      // On web, camera source isn't supported for video — use gallery (file picker)
-      const source = kIsWeb ? ImageSource.gallery : ImageSource.camera;
-      final XFile? video = await picker.pickVideo(
-        source: source,
-        maxDuration: const Duration(seconds: 30),
-      );
-      if (video != null && mounted) {
-        setState(() => _videoFileName = video.name);
-        scaffold.showSnackBar(
-          SnackBar(
-            content: Text('Video added: ${video.name}'),
-            backgroundColor: const Color(0xFF16A34A),
-            behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-          ),
-        );
-      }
-    } catch (e) {
-      if (!mounted) return;
-      scaffold.showSnackBar(
-        SnackBar(
-          content: const Text('Could not access camera. Please grant permission.'),
-          backgroundColor: const Color(0xFFDC2626),
-          behavior: SnackBarBehavior.floating,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-        ),
-      );
-    }
-  }
-
-  Future<void> _handleAudioRecord() async {
-    if (_isRecordingAudio) {
-      // Stop recording
-      final path = await _audioRecorder.stop();
-      _audioTimer?.cancel();
-      if (mounted) {
-        setState(() {
-          _isRecordingAudio = false;
-          if (path != null) {
-            _audioFileName = path.split('/').last.split('\\').last;
-          }
-        });
-        if (path != null) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Audio recorded: ${_audioSeconds}s'),
-              backgroundColor: const Color(0xFF16A34A),
-              behavior: SnackBarBehavior.floating,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-            ),
-          );
-        }
-      }
-    } else {
-      // Check permission and start recording
-      final hasPermission = await _audioRecorder.hasPermission();
-      if (!hasPermission) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: const Text('Microphone permission is required to record audio.'),
-              backgroundColor: const Color(0xFFDC2626),
-              behavior: SnackBarBehavior.floating,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-            ),
-          );
-        }
-        return;
-      }
-
-      // ignore: prefer_const_constructors
-      final config = RecordConfig(
-        encoder: kIsWeb ? AudioEncoder.opus : AudioEncoder.aacLc,
-        sampleRate: 44100,
-        bitRate: 128000,
-      );
-      await _audioRecorder.start(config, path: '');
+  void _nextStep() {
+    if (_step < 4) {
       setState(() {
-        _isRecordingAudio = true;
-        _audioSeconds = 0;
-      });
-      _audioTimer = Timer.periodic(const Duration(seconds: 1), (_) {
-        if (mounted) {
-          setState(() => _audioSeconds++);
-          if (_audioSeconds >= 60) _handleAudioRecord(); // Auto-stop at 60s
-        }
+        _step++;
+        _error = null;
       });
     }
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: const Color(0xFFF6F6F8),
-      body: SafeArea(
-        child: Column(
-          children: [
-            _buildHeader(context),
-            _buildProgressBar(),
-            Expanded(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.symmetric(horizontal: 24),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const SizedBox(height: 24),
-                    _buildWhoIsItFor(),
-                    const SizedBox(height: 28),
-                    _buildOccasionSection(),
-                    const SizedBox(height: 28),
-                    _buildAmountSection(),
-                    const SizedBox(height: 28),
-                    _buildPersonalTouch(),
-                    const SizedBox(height: 28),
-                    _buildPersonalMessage(),
-                    const SizedBox(height: 28),
-                    _buildWhenToDeliver(),
-                    const SizedBox(height: 32),
-                    _buildContinueButton(context),
-                    const SizedBox(height: 12),
-                    _buildDisclaimer(),
-                    const SizedBox(height: 32),
-                  ],
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
+  void _prevStep() {
+    if (_step > 0) {
+      setState(() {
+        _step--;
+        _error = null;
+      });
+    } else {
+      Navigator.pop(context);
+    }
   }
 
-  Widget _buildHeader(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 16, 20, 0),
-      child: Row(
-        children: [
-          GestureDetector(
-            onTap: () => Navigator.pop(context),
-            child: const Padding(
-              padding: EdgeInsets.all(6),
-              child: Icon(Icons.arrow_back_ios,
-                  size: 18, color: Color(0xFF0F172A)),
-            ),
-          ),
-          const SizedBox(width: 4),
-          Expanded(
-            child: Text(
-              'Personalize Your Gift',
-              style: GoogleFonts.manrope(
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
-                  color: const Color(0xFF0F172A)),
-              textAlign: TextAlign.center,
-            ),
-          ),
-          const SizedBox(width: 30),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildProgressBar() {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 10, 20, 0),
-      child: Column(
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Flexible(
-                child: Text('STEP 2 OF 5',
-                    style: GoogleFonts.manrope(
-                        fontSize: 10,
-                        fontWeight: FontWeight.bold,
-                        color: const Color(0xFF135BEC))),
-              ),
-              Flexible(
-                child: Text('Customize your gifts',
-                    style: GoogleFonts.manrope(
-                        fontSize: 10, color: const Color(0xFF94A3B8)),
-                    overflow: TextOverflow.ellipsis),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          ClipRRect(
-            borderRadius: BorderRadius.circular(4),
-            child: const LinearProgressIndicator(
-              value: 2 / 5,
-              backgroundColor: Color(0xFFE2E8F0),
-              valueColor:
-                  AlwaysStoppedAnimation<Color>(Color(0xFF135BEC)),
-              minHeight: 3,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildWhoIsItFor() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text('Who is it for?',
-            style: GoogleFonts.manrope(
-                fontSize: 16,
-                fontWeight: FontWeight.bold,
-                color: const Color(0xFF0F172A))),
-        const SizedBox(height: 12),
-        Container(
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: const Color(0xFFE2E8F0)),
-          ),
-          child: TextField(
-            controller: _recipientController,
-            style: GoogleFonts.manrope(
-                fontSize: 14, color: const Color(0xFF0F172A)),
-            decoration: InputDecoration(
-              hintText: 'e.g. sarah@example.com',
-              hintStyle: GoogleFonts.manrope(
-                  fontSize: 13, color: const Color(0xFFCBD5E1)),
-              prefixIcon: const Icon(Icons.email_outlined,
-                  color: Color(0xFF94A3B8), size: 20),
-              suffixIcon: const Icon(Icons.contacts_outlined,
-                  color: Color(0xFF94A3B8), size: 20),
-              border: InputBorder.none,
-              contentPadding:
-                  const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildOccasionSection() {
-    final isOther = _selectedOccasion == 'Other';
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Text('Choose an Occasion',
-                style: GoogleFonts.manrope(
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold,
-                    color: const Color(0xFF0F172A))),
-            Text('${_occasions.length} options',
-                style: GoogleFonts.manrope(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    color: const Color(0xFF94A3B8))),
-          ],
-        ),
-        const SizedBox(height: 14),
-        GridView.builder(
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: 3,
-            crossAxisSpacing: 10,
-            mainAxisSpacing: 10,
-            childAspectRatio: 1.05,
-          ),
-          itemCount: _occasions.length,
-          itemBuilder: (context, index) {
-            final o = _occasions[index];
-            final isSelected = _selectedOccasion == o['label'] as String;
-            final gradientColors = o['gradient'] as List<Color>;
-            return GestureDetector(
-              onTap: () {
-                setState(() => _selectedOccasion = o['label'] as String);
-                if (o['label'] == 'Other') {
-                  Future.delayed(const Duration(milliseconds: 200), () {
-                    _customOccasionFocus.requestFocus();
-                  });
-                }
-              },
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 200),
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                    colors: gradientColors,
-                  ),
-                  borderRadius: BorderRadius.circular(16),
-                  border: isSelected
-                      ? Border.all(color: Colors.white, width: 2.5)
-                      : null,
-                  boxShadow: [
-                    BoxShadow(
-                      color: gradientColors[0]
-                          .withValues(alpha: isSelected ? 0.45 : 0.25),
-                      blurRadius: isSelected ? 16 : 8,
-                      offset: const Offset(0, 6),
-                    ),
-                  ],
-                ),
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(o['icon'] as IconData, color: Colors.white, size: 26),
-                    const SizedBox(height: 6),
-                    Text(o['label'] as String,
-                        style: GoogleFonts.manrope(
-                          fontSize: 10,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.white,
-                        ),
-                        textAlign: TextAlign.center),
-                  ],
-                ),
-              ),
-            );
-          },
-        ),
-        // Custom occasion input — slides in when Other is selected
-        AnimatedSize(
-          duration: const Duration(milliseconds: 300),
-          curve: Curves.easeInOut,
-          child: isOther
-              ? Padding(
-                  padding: const EdgeInsets.only(top: 14),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('Name your occasion',
-                          style: GoogleFonts.manrope(
-                              fontSize: 13,
-                              fontWeight: FontWeight.w600,
-                              color: const Color(0xFF374151))),
-                      const SizedBox(height: 8),
-                      Container(
-                        decoration: BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.circular(14),
-                          border: Border.all(
-                              color: const Color(0xFF135BEC), width: 1.5),
-                          boxShadow: const [
-                            BoxShadow(
-                                color: Color(0x0A135BEC),
-                                blurRadius: 8,
-                                offset: Offset(0, 4)),
-                          ],
-                        ),
-                        child: TextField(
-                          controller: _customOccasionController,
-                          focusNode: _customOccasionFocus,
-                          style: GoogleFonts.manrope(
-                              fontSize: 14, color: const Color(0xFF0F172A)),
-                          decoration: InputDecoration(
-                            hintText:
-                                'e.g. Retirement, Promotion, Anniversary...',
-                            hintStyle: GoogleFonts.manrope(
-                                fontSize: 13, color: const Color(0xFFCBD5E1)),
-                            prefixIcon: const Icon(Icons.edit_note_outlined,
-                                color: Color(0xFF135BEC), size: 22),
-                            border: InputBorder.none,
-                            contentPadding: const EdgeInsets.symmetric(
-                                horizontal: 16, vertical: 14),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                )
-              : const SizedBox.shrink(),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildAmountSection() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text('Gift Amount (\$)',
-            style: GoogleFonts.manrope(
-                fontSize: 16,
-                fontWeight: FontWeight.bold,
-                color: const Color(0xFF0F172A))),
-        const SizedBox(height: 12),
-        Container(
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: const Color(0xFFE2E8F0)),
-          ),
-          child: TextField(
-            controller: _amountController,
-            keyboardType: TextInputType.number,
-            style: GoogleFonts.manrope(
-                fontSize: 14, color: const Color(0xFF0F172A)),
-            decoration: InputDecoration(
-              hintText: 'e.g. 25.00',
-              hintStyle: GoogleFonts.manrope(
-                  fontSize: 13, color: const Color(0xFFCBD5E1)),
-              prefixIcon: const Icon(Icons.attach_money,
-                  color: Color(0xFF94A3B8), size: 20),
-              border: InputBorder.none,
-              contentPadding:
-                  const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-            ),
-          ),
-        ),
-      ],
-    );
+  bool get _canProceed {
+    switch (_step) {
+      case 0:
+        return _recipientController.text.trim().isNotEmpty &&
+            _recipientController.text.contains('@');
+      case 1:
+        return _selectedOccasion.isNotEmpty;
+      case 2:
+        return (double.tryParse(_amountController.text) ?? 0) > 0;
+      case 3:
+        return true; // media is optional
+      case 4:
+        return true;
+      default:
+        return false;
+    }
   }
 
   Future<void> _handleSendGift() async {
@@ -526,18 +93,19 @@ class _PersonalizeYourGiftScreenState extends State<PersonalizeYourGiftScreen> {
     final message = _messageController.text.trim();
 
     if (recipient.isEmpty || amount == null || amount <= 0) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Please enter recipient email and a valid amount'),
-          backgroundColor: Color(0xFFDC2626),
-        ),
-      );
+      setState(
+          () => _error = 'Please enter recipient email and a valid amount');
       return;
     }
 
-    setState(() => _isSending = true);
+    setState(() {
+      _isSending = true;
+      _error = null;
+    });
+
     final scaffold = ScaffoldMessenger.of(context);
     final nav = Navigator.of(context);
+
     try {
       final appState = Provider.of<AppState>(context, listen: false);
       final occasion = _selectedOccasion == 'Other'
@@ -557,207 +125,450 @@ class _PersonalizeYourGiftScreenState extends State<PersonalizeYourGiftScreen> {
         await appState.refreshWallet();
         if (!mounted) return;
         scaffold.showSnackBar(
-          SnackBar(
-            content: Text('Gift of \$${amount.toStringAsFixed(2)} sent to $recipient!'),
-            backgroundColor: const Color(0xFF16A34A),
-          ),
+          AppWidgets.successSnackBar(
+              'Gift of \$${amount.toStringAsFixed(2)} sent to $recipient!'),
         );
         if (nav.canPop()) nav.pop();
       } else {
-        scaffold.showSnackBar(
-          SnackBar(
-            content: Text(result['error'] ?? 'Failed to send gift'),
-            backgroundColor: const Color(0xFFDC2626),
-          ),
-        );
+        setState(() => _error = result['error'] ?? 'Failed to send gift');
       }
     } catch (e) {
       if (!mounted) return;
-      scaffold.showSnackBar(
-        const SnackBar(
-          content: Text('Something went wrong. Please try again.'),
-          backgroundColor: Color(0xFFDC2626),
-        ),
-      );
+      setState(() => _error = 'Something went wrong. Please try again.');
     } finally {
       if (mounted) setState(() => _isSending = false);
     }
   }
 
-  Widget _buildPersonalTouch() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text('Add a personal touch',
-            style: GoogleFonts.manrope(
-                fontSize: 16,
-                fontWeight: FontWeight.bold,
-                color: const Color(0xFF0F172A))),
-        const SizedBox(height: 14),
-        Row(
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: AppColors.background,
+      body: SafeArea(
+        child: Column(
           children: [
-            // Record Video card
-            Expanded(
-              child: GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onTap: _handleRecordVideo,
-                child: Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: _videoFileName != null
-                        ? const Color(0xFF135BEC).withValues(alpha: 0.05)
-                        : Colors.white,
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(
-                      color: _videoFileName != null
-                          ? const Color(0xFF135BEC)
-                          : const Color(0xFFE2E8F0),
-                    ),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Container(
-                        width: 40,
-                        height: 40,
-                        decoration: BoxDecoration(
-                          color: const Color(0xFF135BEC).withValues(alpha: 0.1),
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                        child: Icon(
-                          _videoFileName != null
-                              ? Icons.check_circle
-                              : Icons.videocam_outlined,
-                          color: const Color(0xFF135BEC),
-                          size: 22,
-                        ),
-                      ),
-                      const SizedBox(height: 10),
-                      Text(
-                        _videoFileName != null ? 'Video Ready' : 'Record Video',
-                        style: GoogleFonts.manrope(
-                            fontSize: 12,
-                            fontWeight: FontWeight.bold,
-                            color: const Color(0xFF0F172A)),
-                      ),
-                      Text(
-                        _videoFileName != null ? 'Tap to re-record' : 'Auto-enhance',
-                        style: GoogleFonts.manrope(
-                            fontSize: 10, color: const Color(0xFF64748B)),
-                      ),
-                    ],
-                  ),
+            _buildHeader(context),
+            _buildProgressBar(),
+            if (_error != null)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(
+                    AppSpacing.pagePadding, 12, AppSpacing.pagePadding, 0),
+                child: ErrorBanner(
+                  message: _error!,
+                  onDismiss: () => setState(() => _error = null),
                 ),
               ),
-            ),
-            const SizedBox(width: 12),
-            // Upload Audio card
             Expanded(
-              child: GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onTap: _handleAudioRecord,
-                child: Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: _isRecordingAudio
-                        ? const Color(0xFFDC2626).withValues(alpha: 0.05)
-                        : _audioFileName != null
-                            ? const Color(0xFF8B5CF6).withValues(alpha: 0.05)
-                            : Colors.white,
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(
-                      color: _isRecordingAudio
-                          ? const Color(0xFFDC2626)
-                          : _audioFileName != null
-                              ? const Color(0xFF8B5CF6)
-                              : const Color(0xFFE2E8F0),
-                    ),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Container(
-                        width: 40,
-                        height: 40,
-                        decoration: BoxDecoration(
-                          color: _isRecordingAudio
-                              ? const Color(0xFFDC2626).withValues(alpha: 0.1)
-                              : const Color(0xFF8B5CF6).withValues(alpha: 0.1),
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                        child: Icon(
-                          _isRecordingAudio
-                              ? Icons.stop_circle
-                              : _audioFileName != null
-                                  ? Icons.check_circle
-                                  : Icons.mic_outlined,
-                          color: _isRecordingAudio
-                              ? const Color(0xFFDC2626)
-                              : const Color(0xFF8B5CF6),
-                          size: 22,
-                        ),
-                      ),
-                      const SizedBox(height: 10),
-                      Text(
-                        _isRecordingAudio
-                            ? 'Recording ${_audioSeconds}s'
-                            : _audioFileName != null
-                                ? 'Audio Ready'
-                                : 'Record Audio',
-                        style: GoogleFonts.manrope(
-                            fontSize: 12,
-                            fontWeight: FontWeight.bold,
-                            color: _isRecordingAudio
-                                ? const Color(0xFFDC2626)
-                                : const Color(0xFF0F172A)),
-                      ),
-                      Text(
-                        _isRecordingAudio
-                            ? 'Tap to stop'
-                            : _audioFileName != null
-                                ? 'Tap to re-record'
-                                : 'Tap to start',
-                        style: GoogleFonts.manrope(
-                            fontSize: 10, color: const Color(0xFF64748B)),
-                      ),
-                    ],
-                  ),
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.symmetric(
+                    horizontal: AppSpacing.pagePadding),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const SizedBox(height: 24),
+                    _buildCurrentStep(),
+                    const SizedBox(height: 32),
+                  ],
                 ),
               ),
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildHeader(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+          AppSpacing.pagePadding, AppSpacing.headerTop, AppSpacing.pagePadding, 0),
+      child: Row(
+        children: [
+          GestureDetector(
+            onTap: _prevStep,
+            child: Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                color: AppColors.surface,
+                shape: BoxShape.circle,
+                border: Border.all(color: AppColors.border),
+              ),
+              child: Icon(
+                _step > 0 ? Icons.arrow_back_ios_new : Icons.close,
+                size: 18,
+                color: AppColors.textPrimary,
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              'Personalize Your Gift',
+              style: AppTextStyles.screenTitle,
+              textAlign: TextAlign.center,
+            ),
+          ),
+          const SizedBox(width: 52), // balance the back button
+        ],
+      ),
+    );
+  }
+
+  Widget _buildProgressBar() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+          AppSpacing.pagePadding, 12, AppSpacing.pagePadding, 0),
+      child: Column(
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                'STEP ${_step + 1} OF 5',
+                style: GoogleFonts.plusJakartaSans(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w700,
+                  color: AppColors.primary,
+                  letterSpacing: 0.5,
+                ),
+              ),
+              Flexible(
+                child: Text(
+                  _stepLabels[_step],
+                  style: AppTextStyles.caption,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(4),
+            child: LinearProgressIndicator(
+              value: (_step + 1) / 5,
+              backgroundColor: AppColors.border,
+              valueColor:
+                  const AlwaysStoppedAnimation<Color>(AppColors.primary),
+              minHeight: 4,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCurrentStep() {
+    switch (_step) {
+      case 0:
+        return _buildStepRecipient();
+      case 1:
+        return _buildStepOccasion();
+      case 2:
+        return _buildStepAmount();
+      case 3:
+        return _buildStepMedia();
+      case 4:
+        return _buildStepMessage();
+      default:
+        return const SizedBox.shrink();
+    }
+  }
+
+  // ─── Step 0: Recipient ───────────────────────────────────────────────────
+
+  Widget _buildStepRecipient() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('Who is it for?', style: AppTextStyles.sectionHeader),
+        const SizedBox(height: 8),
+        Text(
+          'Enter the recipient\'s email address.',
+          style: AppTextStyles.bodySmall,
+        ),
+        const SizedBox(height: 16),
+        Container(
+          decoration: BoxDecoration(
+            color: AppColors.surface,
+            borderRadius: BorderRadius.circular(AppRadius.input),
+            border: Border.all(color: AppColors.border),
+          ),
+          child: TextField(
+            controller: _recipientController,
+            keyboardType: TextInputType.emailAddress,
+            style: GoogleFonts.dmSans(
+                fontSize: 14, color: AppColors.textPrimary),
+            onChanged: (_) => setState(() {}),
+            decoration: InputDecoration(
+              hintText: 'e.g. sarah@example.com',
+              hintStyle:
+                  GoogleFonts.dmSans(fontSize: 13, color: AppColors.textHint),
+              prefixIcon: const Icon(Icons.email_outlined,
+                  color: AppColors.textTertiary, size: 20),
+              suffixIcon: const Icon(Icons.contacts_outlined,
+                  color: AppColors.textTertiary, size: 20),
+              border: InputBorder.none,
+              contentPadding:
+                  const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+            ),
+          ),
+        ),
+        const SizedBox(height: 28),
+        LoadingButton.primary(
+          label: 'Continue',
+          onPressed: _nextStep,
+          enabled: _canProceed,
+          icon: Icons.arrow_forward,
+        ),
       ],
     );
   }
 
-  Widget _buildPersonalMessage() {
+  // ─── Step 1: Occasion ────────────────────────────────────────────────────
+
+  Widget _buildStepOccasion() {
+    final isOther = _selectedOccasion == 'Other';
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text('Personal Message',
-            style: GoogleFonts.manrope(
-                fontSize: 14,
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text('Choose an Occasion', style: AppTextStyles.sectionHeader),
+            Text(
+              '${kDefaultOccasions.length} options',
+              style: AppTextStyles.caption.copyWith(
                 fontWeight: FontWeight.w600,
-                color: const Color(0xFF374151))),
-        const SizedBox(height: 10),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 16),
+        OccasionGrid(
+          selectedOccasion: _selectedOccasion,
+          onSelected: (o) {
+            setState(() => _selectedOccasion = o);
+            if (o == 'Other') {
+              Future.delayed(const Duration(milliseconds: 200), () {
+                _customOccasionFocus.requestFocus();
+              });
+            }
+          },
+        ),
+        // Custom occasion input
+        AnimatedSize(
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeInOut,
+          child: isOther
+              ? Padding(
+                  padding: const EdgeInsets.only(top: 16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Name your occasion',
+                          style: AppTextStyles.fieldLabel),
+                      const SizedBox(height: 8),
+                      Container(
+                        decoration: BoxDecoration(
+                          color: AppColors.surface,
+                          borderRadius: BorderRadius.circular(AppRadius.input),
+                          border: Border.all(
+                              color: AppColors.primary, width: 1.5),
+                        ),
+                        child: TextField(
+                          controller: _customOccasionController,
+                          focusNode: _customOccasionFocus,
+                          style: GoogleFonts.dmSans(
+                              fontSize: 14, color: AppColors.textPrimary),
+                          decoration: InputDecoration(
+                            hintText: 'e.g. Retirement, Promotion...',
+                            hintStyle: GoogleFonts.dmSans(
+                                fontSize: 13, color: AppColors.textHint),
+                            prefixIcon: const Icon(Icons.edit_note_outlined,
+                                color: AppColors.primary, size: 22),
+                            border: InputBorder.none,
+                            contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 16, vertical: 14),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                )
+              : const SizedBox.shrink(),
+        ),
+        const SizedBox(height: 28),
+        LoadingButton.primary(
+          label: 'Continue',
+          onPressed: _nextStep,
+          enabled: _canProceed,
+          icon: Icons.arrow_forward,
+        ),
+      ],
+    );
+  }
+
+  // ─── Step 2: Amount ──────────────────────────────────────────────────────
+
+  Widget _buildStepAmount() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('Gift Amount', style: AppTextStyles.sectionHeader),
+        const SizedBox(height: 8),
+        Text(
+          'How much would you like to gift?',
+          style: AppTextStyles.bodySmall,
+        ),
+        const SizedBox(height: 16),
         Container(
           decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: const Color(0xFFE2E8F0)),
+            color: AppColors.surface,
+            borderRadius: BorderRadius.circular(AppRadius.input),
+            border: Border.all(color: AppColors.border),
+          ),
+          child: TextField(
+            controller: _amountController,
+            keyboardType: TextInputType.number,
+            style: GoogleFonts.plusJakartaSans(
+              fontSize: 28,
+              fontWeight: FontWeight.w800,
+              color: AppColors.textPrimary,
+            ),
+            textAlign: TextAlign.center,
+            onChanged: (_) => setState(() {}),
+            decoration: InputDecoration(
+              hintText: '0.00',
+              hintStyle: GoogleFonts.plusJakartaSans(
+                fontSize: 28,
+                fontWeight: FontWeight.w800,
+                color: AppColors.textHint,
+              ),
+              prefixIcon: Padding(
+                padding: const EdgeInsets.only(left: 20),
+                child: Text(
+                  '\$',
+                  style: GoogleFonts.plusJakartaSans(
+                    fontSize: 28,
+                    fontWeight: FontWeight.w800,
+                    color: AppColors.primary,
+                  ),
+                ),
+              ),
+              prefixIconConstraints:
+                  const BoxConstraints(minWidth: 40, minHeight: 48),
+              border: InputBorder.none,
+              contentPadding:
+                  const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
+            ),
+          ),
+        ),
+        const SizedBox(height: 16),
+        // Quick amount chips
+        Wrap(
+          spacing: 10,
+          runSpacing: 10,
+          children: [10, 25, 50, 100, 200].map((amt) {
+            final isSelected = _amountController.text == amt.toString();
+            return GestureDetector(
+              onTap: () {
+                _amountController.text = amt.toString();
+                setState(() {});
+              },
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 18, vertical: 10),
+                decoration: BoxDecoration(
+                  gradient: isSelected
+                      ? const LinearGradient(
+                          colors: AppColors.primaryGradient)
+                      : null,
+                  color: isSelected ? null : AppColors.surface,
+                  borderRadius: BorderRadius.circular(AppRadius.chip),
+                  border: isSelected
+                      ? null
+                      : Border.all(color: AppColors.border),
+                ),
+                child: Text(
+                  '\$$amt',
+                  style: GoogleFonts.plusJakartaSans(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                    color: isSelected ? Colors.white : AppColors.textPrimary,
+                  ),
+                ),
+              ),
+            );
+          }).toList(),
+        ),
+        const SizedBox(height: 28),
+        LoadingButton.primary(
+          label: 'Continue',
+          onPressed: _nextStep,
+          enabled: _canProceed,
+          icon: Icons.arrow_forward,
+        ),
+      ],
+    );
+  }
+
+  // ─── Step 3: Media ───────────────────────────────────────────────────────
+
+  Widget _buildStepMedia() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('Add a Personal Touch', style: AppTextStyles.sectionHeader),
+        const SizedBox(height: 8),
+        Text(
+          'Record a short video or audio message (optional).',
+          style: AppTextStyles.bodySmall,
+        ),
+        const SizedBox(height: 20),
+        const MediaCapture(),
+        const SizedBox(height: 28),
+        LoadingButton.primary(
+          label: 'Continue',
+          onPressed: _nextStep,
+          icon: Icons.arrow_forward,
+        ),
+        const SizedBox(height: 12),
+        Center(
+          child: GestureDetector(
+            onTap: _nextStep,
+            child: Text('Skip this step', style: AppTextStyles.link),
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ─── Step 4: Message & Delivery ──────────────────────────────────────────
+
+  Widget _buildStepMessage() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('Personal Message', style: AppTextStyles.sectionHeader),
+        const SizedBox(height: 12),
+        Container(
+          decoration: BoxDecoration(
+            color: AppColors.surface,
+            borderRadius: BorderRadius.circular(AppRadius.input),
+            border: Border.all(color: AppColors.border),
           ),
           child: Column(
             children: [
               TextField(
                 controller: _messageController,
                 maxLines: 4,
-                style: GoogleFonts.manrope(
-                    fontSize: 13, color: const Color(0xFF0F172A)),
+                style: GoogleFonts.dmSans(
+                    fontSize: 14, color: AppColors.textPrimary),
                 decoration: InputDecoration(
                   hintText: 'Write something heartfelt here...',
-                  hintStyle: GoogleFonts.manrope(
-                      fontSize: 13, color: const Color(0xFFCBD5E1)),
+                  hintStyle: GoogleFonts.dmSans(
+                      fontSize: 13, color: AppColors.textHint),
                   border: InputBorder.none,
                   contentPadding: const EdgeInsets.all(16),
                 ),
@@ -767,61 +578,51 @@ class _PersonalizeYourGiftScreenState extends State<PersonalizeYourGiftScreen> {
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.end,
                   children: [
-                    Text('0/200 words',
-                        style: GoogleFonts.manrope(
-                            fontSize: 10, color: const Color(0xFF94A3B8))),
+                    Text('0/200 words', style: AppTextStyles.caption),
                   ],
                 ),
               ),
             ],
           ),
         ),
-      ],
-    );
-  }
-
-  Widget _buildWhenToDeliver() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text('When to deliver?',
-            style: GoogleFonts.manrope(
-                fontSize: 16,
-                fontWeight: FontWeight.bold,
-                color: const Color(0xFF0F172A))),
-        const SizedBox(height: 14),
+        const SizedBox(height: 24),
+        // Delivery scheduling
+        Text('When to Deliver?', style: AppTextStyles.sectionHeader),
+        const SizedBox(height: 12),
         Container(
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: const Color(0xFFE2E8F0)),
+            color: AppColors.surface,
+            borderRadius: BorderRadius.circular(AppRadius.input),
+            border: Border.all(color: AppColors.border),
           ),
           child: Row(
             children: [
               Container(
-                width: 40,
-                height: 40,
+                width: 42,
+                height: 42,
                 decoration: BoxDecoration(
-                  color: const Color(0xFFEFF6FF),
-                  borderRadius: BorderRadius.circular(10),
+                  color: AppColors.primaryLight,
+                  borderRadius: BorderRadius.circular(AppRadius.md),
                 ),
                 child: const Icon(Icons.calendar_today_outlined,
-                    color: Color(0xFF135BEC), size: 20),
+                    color: AppColors.primary, size: 20),
               ),
               const SizedBox(width: 14),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('Schedule Delivery',
-                        style: GoogleFonts.manrope(
-                            fontSize: 13,
-                            fontWeight: FontWeight.bold,
-                            color: const Color(0xFF0F172A))),
+                    Text(
+                      'Schedule Delivery',
+                      style: GoogleFonts.plusJakartaSans(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.textPrimary,
+                      ),
+                    ),
                     Text('Pick a date and time',
-                        style: GoogleFonts.manrope(
-                            fontSize: 11, color: const Color(0xFF64748B))),
+                        style: AppTextStyles.caption),
                   ],
                 ),
               ),
@@ -829,22 +630,23 @@ class _PersonalizeYourGiftScreenState extends State<PersonalizeYourGiftScreen> {
                 width: 110,
                 child: TextField(
                   controller: _dateController,
-                  style: GoogleFonts.manrope(
-                      fontSize: 12, color: const Color(0xFF64748B)),
+                  style: GoogleFonts.dmSans(
+                      fontSize: 12, color: AppColors.textSecondary),
                   decoration: InputDecoration(
                     hintText: 'mm/dd/yyyy',
-                    hintStyle: GoogleFonts.manrope(
-                        fontSize: 11, color: const Color(0xFFCBD5E1)),
+                    hintStyle: GoogleFonts.dmSans(
+                        fontSize: 11, color: AppColors.textHint),
                     border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(8),
-                      borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
+                      borderSide: const BorderSide(color: AppColors.border),
                     ),
                     focusedBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(8),
-                      borderSide: const BorderSide(color: Color(0xFF135BEC)),
+                      borderSide:
+                          const BorderSide(color: AppColors.primary),
                     ),
-                    contentPadding:
-                        const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                    contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 10, vertical: 8),
                     isDense: true,
                   ),
                 ),
@@ -852,45 +654,23 @@ class _PersonalizeYourGiftScreenState extends State<PersonalizeYourGiftScreen> {
             ],
           ),
         ),
-      ],
-    );
-  }
-
-  Widget _buildContinueButton(BuildContext context) {
-    return SizedBox(
-      width: double.infinity,
-      height: 54,
-      child: ElevatedButton(
-        onPressed: _isSending ? null : _handleSendGift,
-        style: ElevatedButton.styleFrom(
-          backgroundColor: const Color(0xFF135BEC),
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          elevation: 0,
+        const SizedBox(height: 28),
+        LoadingButton(
+          label: 'Send Gift',
+          onPressed: _handleSendGift,
+          isLoading: _isSending,
+          gradient: AppColors.warmGradient,
+          icon: Icons.card_giftcard,
         ),
-        child: _isSending
-            ? const SizedBox(
-                width: 24,
-                height: 24,
-                child: CircularProgressIndicator(
-                    color: Colors.white, strokeWidth: 2))
-            : Text('Send Gift',
-                style: GoogleFonts.manrope(
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.white)),
-      ),
-    );
-  }
-
-  Widget _buildDisclaimer() {
-    return Center(
-      child: Text(
-        'By continuing, you agree to our Terms of Service\nand Privacy Policy',
-        style:
-            GoogleFonts.manrope(fontSize: 10, color: const Color(0xFF94A3B8)),
-        textAlign: TextAlign.center,
-      ),
+        const SizedBox(height: 12),
+        Center(
+          child: Text(
+            'By continuing, you agree to our Terms of Service\nand Privacy Policy',
+            style: AppTextStyles.caption,
+            textAlign: TextAlign.center,
+          ),
+        ),
+      ],
     );
   }
 }

@@ -55,15 +55,42 @@ def _get_sheets_service():
     return build("sheets", "v4", credentials=creds)
 
 
+def _extract_hyperlink_url(formula: str) -> str:
+    """Extract URL from a =HYPERLINK("url", "text") formula."""
+    if not formula or not formula.startswith("=HYPERLINK"):
+        return ""
+    m = re.match(r'=HYPERLINK\("([^"]+)"', formula)
+    return m.group(1) if m else ""
+
+
 def _fetch_rows():
     service = _get_sheets_service()
+    # Fetch display values
     result = (
         service.spreadsheets()
         .values()
         .get(spreadsheetId=GOOGLE_SHEETS_SPREADSHEET_ID, range="Sheet1!A2:W")
         .execute()
     )
-    return result.get("values", [])
+    rows = result.get("values", [])
+
+    # Fetch formulas for resume (col P) and cover letter (col Q) to extract Drive URLs
+    try:
+        formula_result = (
+            service.spreadsheets()
+            .values()
+            .get(
+                spreadsheetId=GOOGLE_SHEETS_SPREADSHEET_ID,
+                range="Sheet1!P2:Q",
+                valueRenderOption="FORMULA",
+            )
+            .execute()
+        )
+        formula_rows = formula_result.get("values", [])
+    except Exception:
+        formula_rows = []
+
+    return rows, formula_rows
 
 
 PT = ZoneInfo("America/Los_Angeles")
@@ -107,7 +134,7 @@ def _normalize_date(raw: str) -> str:
     return raw  # Return as-is if unparseable
 
 
-def _row_to_job(row: list, row_idx: int) -> Job:
+def _row_to_job(row: list, row_idx: int, formula_rows: list) -> Job:
     # Pad row to 23 columns
     padded = row + [""] * (23 - len(row))
     data = dict(zip(SHEET_COLUMNS, padded))
@@ -118,6 +145,14 @@ def _row_to_job(row: list, row_idx: int) -> Job:
         data["score"] = 0
     # Normalize date_logged to ISO for consistent sorting
     data["date_logged"] = _normalize_date(str(data.get("date_logged", "")))
+    # Extract Drive URLs from HYPERLINK formulas (columns P and Q)
+    if row_idx < len(formula_rows):
+        f_row = formula_rows[row_idx]
+        data["resume_url"] = _extract_hyperlink_url(f_row[0] if len(f_row) > 0 else "")
+        data["cover_letter_url"] = _extract_hyperlink_url(f_row[1] if len(f_row) > 1 else "")
+    else:
+        data["resume_url"] = ""
+        data["cover_letter_url"] = ""
     data["sheet_row"] = row_idx + 2  # +2 for header + 0-indexed
     return Job(**data)
 
@@ -126,8 +161,8 @@ async def _do_sync():
     global _last_synced, _syncing, _job_count
     _syncing = True
     try:
-        rows = await asyncio.get_event_loop().run_in_executor(None, _fetch_rows)
-        jobs = [_row_to_job(row, i) for i, row in enumerate(rows)]
+        rows, formula_rows = await asyncio.get_event_loop().run_in_executor(None, _fetch_rows)
+        jobs = [_row_to_job(row, i, formula_rows) for i, row in enumerate(rows)]
 
         async with async_session() as session:
             # Clear and replace (simple approach for single-user)

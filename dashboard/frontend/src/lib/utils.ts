@@ -35,7 +35,10 @@ export function formatDate(raw: string): string {
   if (!raw) return "—"
   const d = parseDate(raw)
   if (!d) return raw
-  return d.toLocaleString("en-US", {
+  // Cap future dates at now (prevents confusing display from bad data)
+  const now = new Date()
+  const display = d.getTime() > now.getTime() ? now : d
+  const formatted = display.toLocaleString("en-US", {
     month: "2-digit",
     day: "2-digit",
     year: "2-digit",
@@ -43,5 +46,8 @@ export function formatDate(raw: string): string {
     minute: "2-digit",
     hour12: true,
     timeZone: "America/Los_Angeles",
-  }) + " PST"
+  })
+  // Detect PST vs PDT dynamically
+  const tz = display.toLocaleString("en-US", { timeZone: "America/Los_Angeles", timeZoneName: "short" }).split(" ").pop() || "PT"
+  return `${formatted} ${tz}`
 }

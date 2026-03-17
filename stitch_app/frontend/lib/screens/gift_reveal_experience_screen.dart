@@ -1,41 +1,123 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import '../theme/app_theme.dart';
+import '../components/loading_button.dart';
 
+/// Gift reveal experience screen.
+/// Uses REAL data passed via constructor — no hardcoded names/amounts.
 class GiftRevealExperienceScreen extends StatefulWidget {
-  const GiftRevealExperienceScreen({super.key});
+  final String senderName;
+  final String occasion;
+  final String message;
+  final double amount;
+
+  const GiftRevealExperienceScreen({
+    super.key,
+    this.senderName = 'Someone',
+    this.occasion = 'Birthday',
+    this.message = 'Enjoy your gift!',
+    this.amount = 0,
+  });
 
   @override
   State<GiftRevealExperienceScreen> createState() =>
       _GiftRevealExperienceScreenState();
 }
 
-class _GiftRevealExperienceScreenState extends State<GiftRevealExperienceScreen>
-    with SingleTickerProviderStateMixin {
+class _GiftRevealExperienceScreenState
+    extends State<GiftRevealExperienceScreen>
+    with TickerProviderStateMixin {
+  bool _revealed = false;
   bool _accepted = false;
-  late AnimationController _controller;
+
+  late AnimationController _fadeCtrl;
   late Animation<double> _fadeAnim;
+  late AnimationController _scaleCtrl;
+  late Animation<double> _scaleAnim;
+  late AnimationController _amountCtrl;
+  late Animation<double> _amountAnim;
 
   @override
   void initState() {
     super.initState();
-    _controller = AnimationController(
-        vsync: this, duration: const Duration(milliseconds: 500));
-    _fadeAnim = Tween<double>(begin: 0.0, end: 1.0)
-        .animate(CurvedAnimation(parent: _controller, curve: Curves.easeIn));
-    Future.delayed(
-        const Duration(milliseconds: 300), () => _controller.forward());
+    _fadeCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 600),
+    );
+    _fadeAnim = CurvedAnimation(parent: _fadeCtrl, curve: Curves.easeOut);
+
+    _scaleCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 800),
+    );
+    _scaleAnim = Tween<double>(begin: 0.6, end: 1.0).animate(
+      CurvedAnimation(parent: _scaleCtrl, curve: Curves.elasticOut),
+    );
+
+    _amountCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1200),
+    );
+    _amountAnim = Tween<double>(begin: 0, end: widget.amount).animate(
+      CurvedAnimation(parent: _amountCtrl, curve: Curves.easeOutCubic),
+    );
+
+    _fadeCtrl.forward();
+    Future.delayed(const Duration(milliseconds: 300), () {
+      if (mounted) _scaleCtrl.forward();
+    });
   }
 
   @override
   void dispose() {
-    _controller.dispose();
+    _fadeCtrl.dispose();
+    _scaleCtrl.dispose();
+    _amountCtrl.dispose();
     super.dispose();
+  }
+
+  void _revealGift() {
+    setState(() => _revealed = true);
+    _amountCtrl.forward();
+  }
+
+  void _acceptGift() {
+    setState(() => _accepted = true);
+    final nav = Navigator.of(context);
+    Future.delayed(const Duration(milliseconds: 1200), () {
+      if (mounted && nav.canPop()) nav.pop();
+    });
+  }
+
+  IconData get _occasionIcon {
+    switch (widget.occasion.toLowerCase()) {
+      case 'birthday':
+        return Icons.cake;
+      case 'wedding':
+        return Icons.favorite;
+      case 'graduation':
+        return Icons.school;
+      case 'anniversary':
+        return Icons.diamond;
+      case 'holiday':
+        return Icons.celebration;
+      case 'new baby':
+        return Icons.child_care;
+      case 'farewell':
+        return Icons.flight_takeoff;
+      case 'congrats':
+        return Icons.emoji_events;
+      case 'thank you':
+        return Icons.volunteer_activism;
+      default:
+        return Icons.auto_awesome;
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: AppColors.background,
       body: SafeArea(
         child: FadeTransition(
           opacity: _fadeAnim,
@@ -43,16 +125,23 @@ class _GiftRevealExperienceScreenState extends State<GiftRevealExperienceScreen>
             child: Column(
               children: [
                 _buildTopBar(context),
+                const SizedBox(height: 16),
                 _buildSurpriseLabel(),
+                const SizedBox(height: 12),
                 _buildTitle(),
+                const SizedBox(height: 12),
                 _buildQuote(),
-                const SizedBox(height: 20),
-                _buildGiftImage(),
                 const SizedBox(height: 28),
-                _buildCreditsRevealed(),
+                _buildGiftVisual(),
                 const SizedBox(height: 32),
-                _buildActionButtons(context),
-                const SizedBox(height: 32),
+                if (_revealed) ...[
+                  _buildCreditsRevealed(),
+                  const SizedBox(height: 32),
+                  _buildActionButtons(context),
+                ] else ...[
+                  _buildRevealButton(),
+                ],
+                const SizedBox(height: 40),
               ],
             ),
           ),
@@ -63,20 +152,22 @@ class _GiftRevealExperienceScreenState extends State<GiftRevealExperienceScreen>
 
   Widget _buildTopBar(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
+      padding: const EdgeInsets.fromLTRB(
+          AppSpacing.pagePadding, 12, AppSpacing.pagePadding, 0),
       child: Row(
         children: [
           GestureDetector(
             onTap: () => Navigator.pop(context),
             child: Container(
-              width: 36,
-              height: 36,
-              decoration: const BoxDecoration(
-                color: Color(0xFFF1F5F9),
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                color: AppColors.surface,
                 shape: BoxShape.circle,
+                border: Border.all(color: AppColors.border),
               ),
-              child:
-                  const Icon(Icons.close, size: 18, color: Color(0xFF374151)),
+              child: const Icon(Icons.close,
+                  size: 18, color: AppColors.textSecondary),
             ),
           ),
         ],
@@ -85,147 +176,189 @@ class _GiftRevealExperienceScreenState extends State<GiftRevealExperienceScreen>
   }
 
   Widget _buildSurpriseLabel() {
-    return Padding(
-      padding: const EdgeInsets.only(top: 16),
-      child: Text('SURPRISE',
-          style: GoogleFonts.manrope(
-              fontSize: 11,
-              fontWeight: FontWeight.bold,
-              color: const Color(0xFF135BEC),
-              letterSpacing: 2)),
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(colors: AppColors.heroGradient),
+        borderRadius: BorderRadius.circular(AppRadius.chip),
+      ),
+      child: Text(
+        'SURPRISE',
+        style: GoogleFonts.plusJakartaSans(
+          fontSize: 11,
+          fontWeight: FontWeight.w800,
+          color: Colors.white,
+          letterSpacing: 2.5,
+        ),
+      ),
     );
   }
 
   Widget _buildTitle() {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(24, 10, 24, 0),
-      child: Text("You've received a gift!",
-          style: GoogleFonts.manrope(
-              fontSize: 26,
-              fontWeight: FontWeight.w800,
-              color: const Color(0xFF0F172A),
-              letterSpacing: -0.5),
-          textAlign: TextAlign.center),
+      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.pagePadding),
+      child: Text(
+        "You've received a gift!",
+        style: AppTextStyles.h1.copyWith(fontSize: 26),
+        textAlign: TextAlign.center,
+      ),
     );
   }
 
   Widget _buildQuote() {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(32, 10, 32, 0),
-      child: Text('"Happy Birthday! Hope you enjoy this\ntreat on me."',
-          style: GoogleFonts.manrope(
-              fontSize: 13,
-              color: const Color(0xFF64748B),
-              fontStyle: FontStyle.italic,
-              height: 1.5),
-          textAlign: TextAlign.center),
+      padding: const EdgeInsets.symmetric(horizontal: 36),
+      child: Text(
+        '"${widget.message}"',
+        style: GoogleFonts.dmSans(
+          fontSize: 14,
+          color: AppColors.textSecondary,
+          fontStyle: FontStyle.italic,
+          height: 1.5,
+        ),
+        textAlign: TextAlign.center,
+      ),
     );
   }
 
-  Widget _buildGiftImage() {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 24),
-      child: Container(
-        height: 200,
-        decoration: BoxDecoration(
-          color: const Color(0xFFF5EDE8),
-          borderRadius: BorderRadius.circular(20),
-        ),
-        child: Stack(
-          alignment: Alignment.center,
-          children: [
-            Icon(Icons.cake,
-                size: 80, color: const Color(0xFFD97706).withValues(alpha: 0.6)),
-            Container(
-              width: 54,
-              height: 54,
-              decoration: BoxDecoration(
-                color: const Color(0xFF135BEC),
-                shape: BoxShape.circle,
-                boxShadow: [
-                  BoxShadow(
-                      color: const Color(0xFF135BEC).withValues(alpha: 0.4),
-                      blurRadius: 16,
-                      offset: const Offset(0, 6))
-                ],
-              ),
-              child: const Icon(Icons.play_arrow_rounded,
-                  color: Colors.white, size: 28),
+  Widget _buildGiftVisual() {
+    return ScaleTransition(
+      scale: _scaleAnim,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: AppSpacing.pagePadding),
+        child: Container(
+          height: 220,
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [
+                AppColors.primary.withValues(alpha: 0.08),
+                AppColors.accent.withValues(alpha: 0.06),
+              ],
             ),
-          ],
+            borderRadius: BorderRadius.circular(AppRadius.xxl),
+            border: Border.all(
+              color: AppColors.primary.withValues(alpha: 0.12),
+            ),
+          ),
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              // Background occasion icon
+              Icon(
+                _occasionIcon,
+                size: 100,
+                color: AppColors.primary.withValues(alpha: 0.08),
+              ),
+              // Play/Reveal button
+              if (!_revealed)
+                GestureDetector(
+                  onTap: _revealGift,
+                  child: Container(
+                    width: 64,
+                    height: 64,
+                    decoration: BoxDecoration(
+                      gradient: const LinearGradient(
+                          colors: AppColors.primaryGradient),
+                      shape: BoxShape.circle,
+                      boxShadow: [
+                        BoxShadow(
+                          color: AppColors.primary.withValues(alpha: 0.4),
+                          blurRadius: 20,
+                          offset: const Offset(0, 8),
+                        ),
+                      ],
+                    ),
+                    child: const Icon(Icons.play_arrow_rounded,
+                        color: Colors.white, size: 32),
+                  ),
+                )
+              else
+                const Icon(Icons.auto_awesome,
+                    size: 64, color: AppColors.primary),
+            ],
+          ),
         ),
       ),
     );
   }
 
   Widget _buildCreditsRevealed() {
-    return Column(
-      children: [
-        Text('CREDITS REVEALED',
-            style: GoogleFonts.manrope(
-                fontSize: 11,
-                fontWeight: FontWeight.bold,
-                color: const Color(0xFF94A3B8),
-                letterSpacing: 1.5)),
-        const SizedBox(height: 8),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          crossAxisAlignment: CrossAxisAlignment.baseline,
-          textBaseline: TextBaseline.alphabetic,
+    return AnimatedBuilder(
+      animation: _amountAnim,
+      builder: (context, _) {
+        return Column(
           children: [
-            Text('500 ',
-                style: GoogleFonts.manrope(
-                    fontSize: 48,
+            Text(
+              'CREDITS REVEALED',
+              style: GoogleFonts.plusJakartaSans(
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+                color: AppColors.textTertiary,
+                letterSpacing: 1.5,
+              ),
+            ),
+            const SizedBox(height: 10),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.baseline,
+              textBaseline: TextBaseline.alphabetic,
+              children: [
+                Text(
+                  _amountAnim.value.toStringAsFixed(0),
+                  style: GoogleFonts.plusJakartaSans(
+                    fontSize: 52,
                     fontWeight: FontWeight.w900,
-                    color: const Color(0xFF0F172A),
-                    letterSpacing: -2)),
-            Text('UniCredit',
-                style: GoogleFonts.manrope(
-                    fontSize: 22,
+                    color: AppColors.textPrimary,
+                    letterSpacing: -2,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  'Stitch Credits',
+                  style: GoogleFonts.plusJakartaSans(
+                    fontSize: 20,
                     fontWeight: FontWeight.w700,
-                    color: const Color(0xFF135BEC))),
+                    color: AppColors.primary,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Sent by ${widget.senderName}',
+              style: AppTextStyles.bodySmall,
+            ),
           ],
-        ),
-        const SizedBox(height: 6),
-        Text('Sent by Alex Thompson',
-            style: GoogleFonts.manrope(
-                fontSize: 13, color: const Color(0xFF64748B))),
-      ],
+        );
+      },
+    );
+  }
+
+  Widget _buildRevealButton() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.pagePadding),
+      child: LoadingButton(
+        label: 'Reveal Your Gift',
+        onPressed: _revealGift,
+        gradient: AppColors.heroGradient,
+        icon: Icons.auto_awesome,
+      ),
     );
   }
 
   Widget _buildActionButtons(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 24),
+      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.pagePadding),
       child: Column(
         children: [
-          SizedBox(
-            width: double.infinity,
-            height: 54,
-            child: ElevatedButton.icon(
-              onPressed: () {
-                setState(() => _accepted = true);
-                final nav = Navigator.of(context);
-                Future.delayed(const Duration(milliseconds: 800), () {
-                  if (mounted) nav.pop();
-                });
-              },
-              icon: const Icon(Icons.check_circle_outline,
-                  color: Colors.white, size: 20),
-              label: Text(_accepted ? 'Gift Accepted!' : 'Accept Gift',
-                  style: GoogleFonts.manrope(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.white)),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: _accepted
-                    ? const Color(0xFF16A34A)
-                    : const Color(0xFF135BEC),
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(16)),
-                elevation: 0,
-              ),
-            ),
+          LoadingButton(
+            label: _accepted ? 'Gift Accepted!' : 'Accept Gift',
+            onPressed: _accepted ? () {} : _acceptGift,
+            gradient:
+                _accepted ? [AppColors.success, AppColors.success] : AppColors.primaryGradient,
+            icon: Icons.check_circle_outline,
           ),
           const SizedBox(height: 16),
           GestureDetector(
@@ -234,18 +367,30 @@ class _GiftRevealExperienceScreenState extends State<GiftRevealExperienceScreen>
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 const Icon(Icons.reply_rounded,
-                    color: Color(0xFF135BEC), size: 18),
+                    color: AppColors.primary, size: 18),
                 const SizedBox(width: 6),
-                Text('Send Thank You',
-                    style: GoogleFonts.manrope(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
-                        color: const Color(0xFF135BEC))),
+                Text('Send Thank You', style: AppTextStyles.link),
               ],
             ),
           ),
         ],
       ),
     );
+  }
+}
+
+/// Animated builder helper.
+class AnimatedBuilder extends AnimatedWidget {
+  final Widget Function(BuildContext, Widget?) builder;
+
+  const AnimatedBuilder({
+    super.key,
+    required Animation<double> animation,
+    required this.builder,
+  }) : super(listenable: animation);
+
+  @override
+  Widget build(BuildContext context) {
+    return builder(context, null);
   }
 }

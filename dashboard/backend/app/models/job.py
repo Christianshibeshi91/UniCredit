@@ -22,7 +22,9 @@ class Job(SQLModel, table=True):
     linkedin_connections: str = ""
     best_contact: str = ""
     resume_file: str = ""
+    resume_url: str = ""
     cover_letter_file: str = ""
+    cover_letter_url: str = ""
     app_type: str = ""
     app_status: str = Field(default="", index=True)
     date_logged: str = ""
@@ -51,7 +53,9 @@ class JobResponse(SQLModel):
     follow_up_date: str
     follow_up_status: str
     resume_file: str
+    resume_url: str
     cover_letter_file: str
+    cover_letter_url: str
 
 
 class JobDetailResponse(JobResponse):

@@ -10,6 +10,7 @@ import {
   Trophy,
   Lightbulb,
   Brain,
+  Link2,
   Radio,
   Settings,
   Search,
@@ -34,6 +35,7 @@ const NAV_ITEMS = [
   { href: "/dashboard/opportunities", label: "Opportunities", icon: Trophy },
   { href: "/dashboard/suggestions", label: "Suggestions", icon: Lightbulb },
   { href: "/dashboard/intelligence", label: "Intelligence", icon: Brain },
+  { href: "/dashboard/url-analysis", label: "URL Analysis", icon: Link2 },
   { href: "/dashboard/live-data", label: "Live Data", icon: Radio },
   { href: "/dashboard/settings", label: "Settings", icon: Settings },
 ];

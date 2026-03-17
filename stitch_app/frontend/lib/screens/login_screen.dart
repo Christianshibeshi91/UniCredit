@@ -4,9 +4,14 @@ import 'package:google_sign_in/google_sign_in.dart';
 import 'package:provider/provider.dart';
 import '../services/app_state.dart';
 import '../theme/app_theme.dart';
+import '../components/loading_button.dart';
+import '../components/error_banner.dart';
 
-const String _kGoogleClientId =
-    '100377416756-nqs3k3jn8k47a1q8t1kvoka7ief8egkf.apps.googleusercontent.com';
+/// Google Client ID loaded from compile-time env — never hardcoded.
+const String _kGoogleClientId = String.fromEnvironment(
+  'GOOGLE_CLIENT_ID',
+  defaultValue: '',
+);
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -28,9 +33,11 @@ class _LoginScreenState extends State<LoginScreen>
 
   late AnimationController _fadeCtrl;
   late Animation<double> _fade;
+  late AnimationController _slideCtrl;
+  late Animation<Offset> _slideAnim;
 
   final GoogleSignIn _googleSignIn = GoogleSignIn(
-    clientId: _kGoogleClientId,
+    clientId: _kGoogleClientId.isNotEmpty ? _kGoogleClientId : null,
     scopes: ['email', 'profile'],
   );
 
@@ -38,14 +45,26 @@ class _LoginScreenState extends State<LoginScreen>
   void initState() {
     super.initState();
     _fadeCtrl = AnimationController(
-        vsync: this, duration: const Duration(milliseconds: 800));
-    _fade = CurvedAnimation(parent: _fadeCtrl, curve: Curves.easeIn);
+      vsync: this,
+      duration: const Duration(milliseconds: 900),
+    );
+    _fade = CurvedAnimation(parent: _fadeCtrl, curve: Curves.easeOut);
+    _slideCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 700),
+    );
+    _slideAnim = Tween<Offset>(
+      begin: const Offset(0, 0.08),
+      end: Offset.zero,
+    ).animate(CurvedAnimation(parent: _slideCtrl, curve: Curves.easeOutCubic));
     _fadeCtrl.forward();
+    _slideCtrl.forward();
   }
 
   @override
   void dispose() {
     _fadeCtrl.dispose();
+    _slideCtrl.dispose();
     _nameCtrl.dispose();
     _emailCtrl.dispose();
     _passCtrl.dispose();
@@ -107,69 +126,13 @@ class _LoginScreenState extends State<LoginScreen>
     }
   }
 
-  void _showForgotPasswordDialog() {
-    final resetEmailCtrl = TextEditingController();
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Text('Reset Password',
-            style: GoogleFonts.manrope(fontWeight: FontWeight.w700)),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              'Enter your email and we\'ll send you instructions to reset your password.',
-              style: GoogleFonts.manrope(
-                  fontSize: 13, color: AppColors.textSecondary),
-            ),
-            const SizedBox(height: 16),
-            TextField(
-              controller: resetEmailCtrl,
-              keyboardType: TextInputType.emailAddress,
-              decoration: InputDecoration(
-                hintText: 'Email address',
-                prefixIcon: const Icon(Icons.email_outlined, size: 20),
-                border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12)),
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: Text('Cancel',
-                style: GoogleFonts.manrope(color: AppColors.textSecondary)),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.pop(ctx);
-              if (resetEmailCtrl.text.trim().isNotEmpty) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  AppWidgets.successSnackBar(
-                      'If that email exists, reset instructions have been sent.'),
-                );
-              }
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.primary,
-              shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10)),
-            ),
-            child: Text('Send Reset Link',
-                style: GoogleFonts.manrope(
-                    color: Colors.white, fontWeight: FontWeight.w600)),
-          ),
-        ],
-      ),
-    );
-  }
-
   Future<void> _handleGoogleSignIn() async {
-    // Capture appState before async gap
-    final appState = Provider.of<AppState>(context, listen: false);
+    if (_kGoogleClientId.isEmpty) {
+      setState(() => _error = 'Google Sign-In is not configured');
+      return;
+    }
 
+    final appState = Provider.of<AppState>(context, listen: false);
     setState(() {
       _isGoogleLoading = true;
       _error = null;
@@ -178,7 +141,6 @@ class _LoginScreenState extends State<LoginScreen>
     try {
       final GoogleSignInAccount? googleUser = await _googleSignIn.signIn();
       if (googleUser == null) {
-        // User cancelled
         if (mounted) setState(() => _isGoogleLoading = false);
         return;
       }
@@ -205,7 +167,6 @@ class _LoginScreenState extends State<LoginScreen>
       );
 
       if (!mounted) return;
-
       if (error != null) {
         setState(() {
           _error = error;
@@ -224,134 +185,107 @@ class _LoginScreenState extends State<LoginScreen>
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF8F8FA),
+      backgroundColor: AppColors.background,
       body: SafeArea(
         child: FadeTransition(
           opacity: _fade,
-          child: SingleChildScrollView(
-            child: Column(
-              children: [
-                // ── Top Bar ──
-                _buildTopBar(),
-                const SizedBox(height: 24),
-                // ── Card Icon Illustration ──
-                _buildCardIllustration(),
-                const SizedBox(height: 32),
-                // ── Welcome Text ──
-                Text(
-                  _isRegisterMode ? 'Create Account' : 'Welcome Back',
-                  style: GoogleFonts.manrope(
-                    fontSize: 28,
-                    fontWeight: FontWeight.w800,
-                    color: AppColors.textPrimary,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  _isRegisterMode
-                      ? 'Join the UniCredit community'
-                      : 'Elevating your digital gift experience',
-                  style: GoogleFonts.manrope(
-                    fontSize: 14,
-                    color: AppColors.textSecondary,
-                  ),
-                ),
-                const SizedBox(height: 32),
-                // ── Form ──
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 28),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      // Error message
-                      if (_error != null) ...[
-                        Container(
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            color: Colors.red.shade50,
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: Colors.red.shade200),
+          child: SlideTransition(
+            position: _slideAnim,
+            child: SingleChildScrollView(
+              child: Column(
+                children: [
+                  _buildTopBar(),
+                  const SizedBox(height: 28),
+                  _buildLogo(),
+                  const SizedBox(height: 36),
+                  _buildWelcomeText(),
+                  const SizedBox(height: 32),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: AppSpacing.pagePadding + 4),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        if (_error != null) ...[
+                          ErrorBanner(
+                            message: _error!,
+                            onDismiss: () => setState(() => _error = null),
                           ),
-                          child: Row(
-                            children: [
-                              Icon(Icons.error_outline,
-                                  color: Colors.red.shade700, size: 18),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: Text(_error!,
-                                    style: TextStyle(
-                                        color: Colors.red.shade700,
-                                        fontSize: 13)),
-                              ),
-                            ],
-                          ),
+                          const SizedBox(height: 16),
+                        ],
+                        // Name field (register only)
+                        AnimatedSize(
+                          duration: const Duration(milliseconds: 300),
+                          curve: Curves.easeInOut,
+                          child: _isRegisterMode
+                              ? Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    _buildLabel('FULL NAME'),
+                                    const SizedBox(height: 8),
+                                    _buildTextField(
+                                      controller: _nameCtrl,
+                                      hint: 'John Doe',
+                                      icon: Icons.person_outline,
+                                    ),
+                                    const SizedBox(height: 20),
+                                  ],
+                                )
+                              : const SizedBox.shrink(),
                         ),
-                        const SizedBox(height: 16),
-                      ],
-                      // Name field (register only)
-                      if (_isRegisterMode) ...[
-                        _buildLabel('FULL NAME'),
+                        _buildLabel('EMAIL ADDRESS'),
                         const SizedBox(height: 8),
                         _buildTextField(
-                          controller: _nameCtrl,
-                          hint: 'John Doe',
-                          icon: Icons.person_outline,
+                          controller: _emailCtrl,
+                          hint: 'hello@stitch.app',
+                          icon: Icons.email_outlined,
+                          keyboardType: TextInputType.emailAddress,
                         ),
                         const SizedBox(height: 20),
-                      ],
-                      // Email field
-                      _buildLabel('EMAIL ADDRESS'),
-                      const SizedBox(height: 8),
-                      _buildTextField(
-                        controller: _emailCtrl,
-                        hint: 'hello@unicredit.com',
-                        icon: Icons.email_outlined,
-                        keyboardType: TextInputType.emailAddress,
-                      ),
-                      const SizedBox(height: 20),
-                      // Password field with Forgot link
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          _buildLabel('PASSWORD'),
-                          if (!_isRegisterMode)
-                            GestureDetector(
-                              onTap: _showForgotPasswordDialog,
-                              child: Text(
-                                'Forgot?',
-                                style: GoogleFonts.manrope(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w600,
-                                  color: AppColors.primary,
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            _buildLabel('PASSWORD'),
+                            if (!_isRegisterMode)
+                              GestureDetector(
+                                onTap: _showForgotPasswordDialog,
+                                child: Text(
+                                  'Forgot?',
+                                  style: AppTextStyles.link.copyWith(
+                                    fontSize: 12,
+                                  ),
                                 ),
                               ),
-                            ),
-                        ],
-                      ),
-                      const SizedBox(height: 8),
-                      _buildTextField(
-                        controller: _passCtrl,
-                        hint: '\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022',
-                        icon: Icons.lock_outline,
-                        isPassword: true,
-                      ),
-                      const SizedBox(height: 28),
-                      // Sign In / Create Account button
-                      _buildSignInButton(),
-                      const SizedBox(height: 24),
-                      // Social Login divider
-                      _buildDivider(),
-                      const SizedBox(height: 24),
-                      // Google Sign-In button
-                      _buildGoogleButton(),
-                      const SizedBox(height: 28),
-                      // Toggle register/login
-                      _buildToggleMode(),
-                      const SizedBox(height: 32),
-                    ],
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        _buildTextField(
+                          controller: _passCtrl,
+                          hint: '\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022',
+                          icon: Icons.lock_outline,
+                          isPassword: true,
+                        ),
+                        const SizedBox(height: 28),
+                        LoadingButton.primary(
+                          label: _isRegisterMode ? 'Create Account' : 'Sign In',
+                          onPressed: _submit,
+                          isLoading: _isLoading,
+                          icon: _isRegisterMode
+                              ? Icons.person_add_outlined
+                              : Icons.login,
+                        ),
+                        const SizedBox(height: 24),
+                        _buildDivider(),
+                        const SizedBox(height: 24),
+                        _buildGoogleButton(),
+                        const SizedBox(height: 28),
+                        _buildToggleMode(),
+                        const SizedBox(height: 40),
+                      ],
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         ),
@@ -361,123 +295,89 @@ class _LoginScreenState extends State<LoginScreen>
 
   Widget _buildTopBar() {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+      padding: const EdgeInsets.symmetric(
+          horizontal: AppSpacing.pagePadding, vertical: 12),
       child: Center(
         child: Text(
-          'UniCredit',
-          style: GoogleFonts.manrope(
-            fontSize: 17,
-            fontWeight: FontWeight.w700,
-            color: AppColors.textPrimary,
-            letterSpacing: -0.3,
+          'Stitch',
+          style: GoogleFonts.plusJakartaSans(
+            fontSize: 20,
+            fontWeight: FontWeight.w800,
+            color: AppColors.primary,
+            letterSpacing: -0.5,
           ),
         ),
       ),
     );
   }
 
-  Widget _buildCardIllustration() {
+  Widget _buildLogo() {
     return Container(
-      width: 140,
-      height: 140,
+      width: 120,
+      height: 120,
       decoration: BoxDecoration(
-        color: Colors.white,
+        gradient: const LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: AppColors.primaryGradient,
+        ),
         borderRadius: BorderRadius.circular(32),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.06),
-            blurRadius: 30,
-            offset: const Offset(0, 10),
-          ),
-          BoxShadow(
-            color: AppColors.primary.withValues(alpha: 0.05),
-            blurRadius: 60,
-            offset: const Offset(0, 20),
+            color: AppColors.primary.withValues(alpha: 0.3),
+            blurRadius: 32,
+            offset: const Offset(0, 12),
           ),
         ],
       ),
       child: Stack(
         alignment: Alignment.center,
         children: [
-          // Credit card shape
-          Container(
-            width: 72,
-            height: 48,
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                colors: [
-                  Colors.grey.shade200,
-                  Colors.grey.shade100,
-                ],
-              ),
-              borderRadius: BorderRadius.circular(8),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.08),
-                  blurRadius: 8,
-                  offset: const Offset(0, 2),
-                ),
-              ],
-            ),
-            child: Padding(
-              padding: const EdgeInsets.all(8),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Container(
-                    width: 28,
-                    height: 6,
-                    decoration: BoxDecoration(
-                      color: Colors.grey.shade300,
-                      borderRadius: BorderRadius.circular(3),
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  Container(
-                    width: 40,
-                    height: 4,
-                    decoration: BoxDecoration(
-                      color: Colors.grey.shade300,
-                      borderRadius: BorderRadius.circular(2),
-                    ),
-                  ),
-                ],
+          // Decorative inner orb
+          Positioned(
+            top: 10,
+            right: 10,
+            child: Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.12),
+                shape: BoxShape.circle,
               ),
             ),
           ),
-          // Gift bow icon - top right of card
-          Positioned(
-            top: 30,
-            right: 28,
-            child: Container(
-              padding: const EdgeInsets.all(6),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                shape: BoxShape.circle,
-                boxShadow: [
-                  BoxShadow(
-                    color: AppColors.primary.withValues(alpha: 0.2),
-                    blurRadius: 8,
-                  ),
-                ],
-              ),
-              child: const Icon(
-                Icons.card_giftcard,
-                color: AppColors.primary,
-                size: 20,
-              ),
-            ),
+          const Icon(
+            Icons.card_giftcard,
+            color: Colors.white,
+            size: 48,
           ),
         ],
       ),
     );
   }
 
+  Widget _buildWelcomeText() {
+    return Column(
+      children: [
+        Text(
+          _isRegisterMode ? 'Create Account' : 'Welcome Back',
+          style: AppTextStyles.h1,
+        ),
+        const SizedBox(height: 8),
+        Text(
+          _isRegisterMode
+              ? 'Join the Stitch community'
+              : 'Your digital gift wallet awaits',
+          style: AppTextStyles.bodySmall.copyWith(fontSize: 14),
+        ),
+      ],
+    );
+  }
+
   Widget _buildLabel(String text) {
     return Text(
       text,
-      style: GoogleFonts.manrope(
+      style: GoogleFonts.plusJakartaSans(
         fontSize: 11,
         fontWeight: FontWeight.w700,
         color: AppColors.textSecondary,
@@ -494,15 +394,15 @@ class _LoginScreenState extends State<LoginScreen>
     TextInputType keyboardType = TextInputType.text,
   }) {
     return Container(
-      height: 54,
+      height: AppSizes.inputHeight,
       decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: const Color(0xFFE8ECF0)),
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(AppRadius.input),
+        border: Border.all(color: AppColors.border),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withValues(alpha: 0.02),
-            blurRadius: 4,
+            blurRadius: 6,
             offset: const Offset(0, 2),
           ),
         ],
@@ -510,9 +410,9 @@ class _LoginScreenState extends State<LoginScreen>
       child: TextField(
         controller: controller,
         obscureText: isPassword && _obscurePass,
-        keyboardType: isPassword ? TextInputType.visiblePassword : keyboardType,
-        style: GoogleFonts.manrope(
-            fontSize: 15, color: AppColors.textPrimary),
+        keyboardType:
+            isPassword ? TextInputType.visiblePassword : keyboardType,
+        style: GoogleFonts.dmSans(fontSize: 15, color: AppColors.textPrimary),
         onSubmitted: (_) => _submit(),
         decoration: InputDecoration(
           prefixIcon: Padding(
@@ -524,20 +424,18 @@ class _LoginScreenState extends State<LoginScreen>
           suffixIcon: isPassword
               ? IconButton(
                   icon: Icon(
-                      _obscurePass
-                          ? Icons.visibility_outlined
-                          : Icons.visibility_off_outlined,
-                      color: AppColors.textTertiary,
-                      size: 20),
+                    _obscurePass
+                        ? Icons.visibility_outlined
+                        : Icons.visibility_off_outlined,
+                    color: AppColors.textTertiary,
+                    size: 20,
+                  ),
                   onPressed: () =>
                       setState(() => _obscurePass = !_obscurePass),
                 )
               : null,
           hintText: hint,
-          hintStyle: GoogleFonts.manrope(
-            fontSize: 15,
-            color: AppColors.textHint,
-          ),
+          hintStyle: GoogleFonts.dmSans(fontSize: 15, color: AppColors.textHint),
           border: InputBorder.none,
           contentPadding:
               const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
@@ -546,60 +444,15 @@ class _LoginScreenState extends State<LoginScreen>
     );
   }
 
-  Widget _buildSignInButton() {
-    return SizedBox(
-      width: double.infinity,
-      height: 56,
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          gradient: const LinearGradient(
-            colors: [Color(0xFF7C3AED), Color(0xFF6D28D9)],
-          ),
-          borderRadius: BorderRadius.circular(16),
-          boxShadow: [
-            BoxShadow(
-              color: const Color(0xFF7C3AED).withValues(alpha: 0.3),
-              blurRadius: 16,
-              offset: const Offset(0, 6),
-            ),
-          ],
-        ),
-        child: ElevatedButton(
-          onPressed: _isLoading ? null : _submit,
-          style: ElevatedButton.styleFrom(
-            backgroundColor: Colors.transparent,
-            shadowColor: Colors.transparent,
-            shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(16)),
-            elevation: 0,
-          ),
-          child: _isLoading
-              ? const SizedBox(
-                  width: 24,
-                  height: 24,
-                  child: CircularProgressIndicator(
-                      color: Colors.white, strokeWidth: 2))
-              : Text(
-                  _isRegisterMode ? 'Create Account' : 'Sign In',
-                  style: GoogleFonts.manrope(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.white),
-                ),
-        ),
-      ),
-    );
-  }
-
   Widget _buildDivider() {
     return Row(
       children: [
-        Expanded(child: Divider(color: Colors.grey.shade200, thickness: 1)),
+        const Expanded(child: Divider(color: AppColors.border, thickness: 1)),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16),
           child: Text(
-            'SOCIAL LOGIN',
-            style: GoogleFonts.manrope(
+            'OR CONTINUE WITH',
+            style: GoogleFonts.plusJakartaSans(
               fontSize: 10,
               fontWeight: FontWeight.w600,
               color: AppColors.textTertiary,
@@ -607,7 +460,7 @@ class _LoginScreenState extends State<LoginScreen>
             ),
           ),
         ),
-        Expanded(child: Divider(color: Colors.grey.shade200, thickness: 1)),
+        const Expanded(child: Divider(color: AppColors.border, thickness: 1)),
       ],
     );
   }
@@ -615,26 +468,25 @@ class _LoginScreenState extends State<LoginScreen>
   Widget _buildGoogleButton() {
     return SizedBox(
       width: double.infinity,
-      height: 56,
+      height: AppSizes.buttonHeight,
       child: OutlinedButton(
         onPressed: _isGoogleLoading ? null : _handleGoogleSignIn,
         style: OutlinedButton.styleFrom(
-          backgroundColor: Colors.white,
-          side: BorderSide(color: Colors.grey.shade200),
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          backgroundColor: AppColors.surface,
+          side: const BorderSide(color: AppColors.border),
+          shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(AppRadius.button)),
           elevation: 0,
         ),
         child: _isGoogleLoading
             ? const SizedBox(
-                width: 24,
-                height: 24,
+                width: 22,
+                height: 22,
                 child: CircularProgressIndicator(strokeWidth: 2))
             : Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  // Google "G" icon
                   SizedBox(
                     width: 20,
                     height: 20,
@@ -645,7 +497,7 @@ class _LoginScreenState extends State<LoginScreen>
                     child: Text(
                       'Continue with Google',
                       overflow: TextOverflow.ellipsis,
-                      style: GoogleFonts.manrope(
+                      style: GoogleFonts.plusJakartaSans(
                         fontSize: 15,
                         fontWeight: FontWeight.w600,
                         color: AppColors.textPrimary,
@@ -669,24 +521,77 @@ class _LoginScreenState extends State<LoginScreen>
         },
         child: RichText(
           text: TextSpan(
-            style: GoogleFonts.manrope(
-                fontSize: 13, color: AppColors.textSecondary),
+            style: AppTextStyles.bodySmall.copyWith(fontSize: 13),
             children: [
               TextSpan(
-                  text: _isRegisterMode
-                      ? 'Already have an account?  '
-                      : 'New to UniCredit?  '),
+                text: _isRegisterMode
+                    ? 'Already have an account?  '
+                    : 'New to Stitch?  ',
+              ),
               TextSpan(
                 text: _isRegisterMode ? 'Sign In' : 'Create Account',
-                style: GoogleFonts.manrope(
-                  fontSize: 13,
-                  color: AppColors.primary,
-                  fontWeight: FontWeight.bold,
-                ),
+                style: AppTextStyles.link.copyWith(fontSize: 13),
               ),
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  void _showForgotPasswordDialog() {
+    final resetEmailCtrl = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(AppRadius.xl)),
+        title: Text('Reset Password', style: AppTextStyles.h3),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              'Enter your email and we\'ll send you instructions to reset your password.',
+              style: AppTextStyles.bodySmall,
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: resetEmailCtrl,
+              keyboardType: TextInputType.emailAddress,
+              decoration: AppWidgets.inputDecoration(
+                hint: 'Email address',
+                prefixIcon: Icons.email_outlined,
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text('Cancel',
+                style: AppTextStyles.bodyMedium
+                    .copyWith(color: AppColors.textSecondary)),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              if (resetEmailCtrl.text.trim().isNotEmpty) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  AppWidgets.successSnackBar(
+                      'If that email exists, reset instructions have been sent.'),
+                );
+              }
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.primary,
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(AppRadius.md)),
+            ),
+            child: Text('Send Reset Link',
+                style: GoogleFonts.plusJakartaSans(
+                    color: Colors.white, fontWeight: FontWeight.w600)),
+          ),
+        ],
       ),
     );
   }
@@ -702,7 +607,6 @@ class _GoogleLogoPainter extends CustomPainter {
     final double cy = h / 2;
     final double r = w / 2;
 
-    // Blue arc (right)
     final bluePaint = Paint()
       ..color = const Color(0xFF4285F4)
       ..style = PaintingStyle.stroke
@@ -710,13 +614,12 @@ class _GoogleLogoPainter extends CustomPainter {
       ..strokeCap = StrokeCap.butt;
     canvas.drawArc(
       Rect.fromCircle(center: Offset(cx, cy), radius: r * 0.8),
-      -0.6, // start angle
-      1.8, // sweep
+      -0.6,
+      1.8,
       false,
       bluePaint,
     );
 
-    // Green arc (bottom-right)
     final greenPaint = Paint()
       ..color = const Color(0xFF34A853)
       ..style = PaintingStyle.stroke
@@ -730,7 +633,6 @@ class _GoogleLogoPainter extends CustomPainter {
       greenPaint,
     );
 
-    // Yellow arc (bottom-left)
     final yellowPaint = Paint()
       ..color = const Color(0xFFFBBC05)
       ..style = PaintingStyle.stroke
@@ -744,7 +646,6 @@ class _GoogleLogoPainter extends CustomPainter {
       yellowPaint,
     );
 
-    // Red arc (top-left)
     final redPaint = Paint()
       ..color = const Color(0xFFEA4335)
       ..style = PaintingStyle.stroke
@@ -758,7 +659,6 @@ class _GoogleLogoPainter extends CustomPainter {
       redPaint,
     );
 
-    // Horizontal bar of the G
     final barPaint = Paint()
       ..color = const Color(0xFF4285F4)
       ..style = PaintingStyle.fill;

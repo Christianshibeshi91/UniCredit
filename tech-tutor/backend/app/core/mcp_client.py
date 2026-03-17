@@ -70,13 +70,19 @@ async def stop_mcp() -> None:
         _cm = None
 
 
-async def call_tool(name: str, arguments: dict[str, Any] | None = None) -> Any:
-    """Call an MCP tool and return its result content."""
+async def call_tool(name: str, arguments: dict[str, Any] | None = None, timeout: int = 60) -> Any:
+    """Call an MCP tool and return its result content. Timeout in seconds."""
     if _session is None:
         raise RuntimeError("MCP session not initialized. Call start_mcp() first.")
 
     logger.info(f"MCP call_tool: {name}({arguments})")
-    result = await _session.call_tool(name, arguments or {})
+    try:
+        result = await asyncio.wait_for(
+            _session.call_tool(name, arguments or {}),
+            timeout=timeout,
+        )
+    except asyncio.TimeoutError:
+        raise TimeoutError(f"MCP tool '{name}' timed out after {timeout}s")
 
     # Extract text content from result
     text = ""

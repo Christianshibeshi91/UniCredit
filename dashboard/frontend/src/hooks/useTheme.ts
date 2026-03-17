@@ -9,7 +9,7 @@ interface ThemeState {
 export const useTheme = create<ThemeState>()(
   persist(
     (set) => ({
-      dark: false,
+      dark: true,
       toggle: () =>
         set((s) => {
           const next = !s.dark
@@ -20,7 +20,8 @@ export const useTheme = create<ThemeState>()(
     {
       name: "theme",
       onRehydrateStorage: () => (state) => {
-        if (state?.dark) document.documentElement.classList.add("dark")
+        if (state?.dark !== false) document.documentElement.classList.add("dark")
+        else document.documentElement.classList.remove("dark")
       },
     }
   )

@@ -5,6 +5,8 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../services/app_state.dart';
 import '../services/api_service.dart';
+import '../theme/app_theme.dart';
+import '../components/loading_button.dart';
 
 class AddCreditScreen extends StatefulWidget {
   const AddCreditScreen({super.key});
@@ -41,13 +43,15 @@ class _AddCreditScreenState extends State<AddCreditScreen> {
     }
   }
 
-  /// Find the Stripe price ID that matches the selected amount, or fall back
-  /// to the first available price.
   String? _matchingPriceId() {
     for (final p in _stripePrices) {
-      if ((p['amount'] as num).toInt() == _selectedAmount) return p['id'] as String;
+      if ((p['amount'] as num).toInt() == _selectedAmount) {
+        return p['id'] as String;
+      }
     }
-    return _stripePrices.isNotEmpty ? _stripePrices.first['id'] as String : null;
+    return _stripePrices.isNotEmpty
+        ? _stripePrices.first['id'] as String
+        : null;
   }
 
   Future<void> _handleAddCredit() async {
@@ -57,7 +61,6 @@ class _AddCreditScreenState extends State<AddCreditScreen> {
       final priceId = _matchingPriceId();
 
       if (priceId != null) {
-        // Try Stripe checkout
         final url = await ApiService.createCheckoutSession(
           priceId: priceId,
           userEmail: appState.userEmail,
@@ -66,7 +69,6 @@ class _AddCreditScreenState extends State<AddCreditScreen> {
           final uri = Uri.parse(url);
           if (await canLaunchUrl(uri)) {
             await launchUrl(uri, mode: LaunchMode.externalApplication);
-            // Refresh balance after returning from payment
             await Future.delayed(const Duration(seconds: 2));
             await appState.refreshWallet();
             if (mounted && Navigator.canPop(context)) Navigator.pop(context);
@@ -75,7 +77,7 @@ class _AddCreditScreenState extends State<AddCreditScreen> {
         }
       }
 
-      // Fallback: direct in-memory credit via convert endpoint
+      // Fallback: direct in-memory credit
       await ApiService.convertGiftCard(
         merchant: 'Wallet Top-Up',
         cardNumber: 'TOPUP',
@@ -85,19 +87,13 @@ class _AddCreditScreenState extends State<AddCreditScreen> {
       await appState.refreshWallet();
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('\$$_selectedAmount added to your wallet!'),
-          backgroundColor: const Color(0xFF16A34A),
-        ),
+        AppWidgets.successSnackBar('\$$_selectedAmount added to your wallet!'),
       );
       if (Navigator.canPop(context)) Navigator.pop(context);
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Something went wrong. Please try again.'),
-          backgroundColor: Color(0xFFDC2626),
-        ),
+        AppWidgets.errorSnackBar('Something went wrong. Please try again.'),
       );
     } finally {
       if (mounted) setState(() => _isLoading = false);
@@ -107,7 +103,7 @@ class _AddCreditScreenState extends State<AddCreditScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF6F6F8),
+      backgroundColor: AppColors.background,
       body: SafeArea(
         child: SingleChildScrollView(
           child: Column(
@@ -127,7 +123,8 @@ class _AddCreditScreenState extends State<AddCreditScreen> {
 
   Widget _buildHeader(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(24, 20, 24, 8),
+      padding: const EdgeInsets.fromLTRB(
+          AppSpacing.pagePadding, AppSpacing.headerTop + 4, AppSpacing.pagePadding, 8),
       child: Row(
         children: [
           GestureDetector(
@@ -136,34 +133,21 @@ class _AddCreditScreenState extends State<AddCreditScreen> {
               width: 40,
               height: 40,
               decoration: BoxDecoration(
-                color: Colors.white,
+                color: AppColors.surface,
                 shape: BoxShape.circle,
-                border: Border.all(color: const Color(0xFFE2E8F0)),
+                border: Border.all(color: AppColors.border),
               ),
-              child: const Icon(Icons.arrow_back_ios,
-                  size: 18, color: Color(0xFF0F172A)),
+              child: const Icon(Icons.arrow_back_ios_new,
+                  size: 18, color: AppColors.textPrimary),
             ),
           ),
           const SizedBox(width: 16),
           Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                'Add Credit',
-                style: GoogleFonts.manrope(
-                  fontSize: 22,
-                  fontWeight: FontWeight.w800,
-                  color: const Color(0xFF0F172A),
-                  letterSpacing: -0.5,
-                ),
-              ),
-              Text(
-                'Top up your Stitch wallet',
-                style: GoogleFonts.manrope(
-                  fontSize: 12,
-                  color: const Color(0xFF64748B),
-                ),
-              ),
+              Text('Add Credit', style: AppTextStyles.h2),
+              Text('Top up your Stitch wallet',
+                  style: AppTextStyles.caption),
             ],
           ),
         ],
@@ -173,21 +157,22 @@ class _AddCreditScreenState extends State<AddCreditScreen> {
 
   Widget _buildSelectedAmountDisplay() {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+      padding: const EdgeInsets.symmetric(
+          horizontal: AppSpacing.pagePadding, vertical: 16),
       child: Container(
         padding: const EdgeInsets.all(28),
         decoration: BoxDecoration(
           gradient: const LinearGradient(
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
-            colors: [Color(0xFF135BEC), Color(0xFF2B6EFF)],
+            colors: AppColors.cardGradient,
           ),
-          borderRadius: BorderRadius.circular(24),
+          borderRadius: BorderRadius.circular(AppRadius.xxl),
           boxShadow: [
             BoxShadow(
-              color: const Color(0xFF135BEC).withValues(alpha: 0.3),
-              blurRadius: 20,
-              offset: const Offset(0, 10),
+              color: AppColors.primary.withValues(alpha: 0.35),
+              blurRadius: 24,
+              offset: const Offset(0, 12),
             ),
           ],
         ),
@@ -199,7 +184,7 @@ class _AddCreditScreenState extends State<AddCreditScreen> {
               children: [
                 Text(
                   'You are adding',
-                  style: GoogleFonts.manrope(
+                  style: GoogleFonts.dmSans(
                     fontSize: 13,
                     color: Colors.white.withValues(alpha: 0.75),
                   ),
@@ -207,7 +192,7 @@ class _AddCreditScreenState extends State<AddCreditScreen> {
                 const SizedBox(height: 6),
                 Text(
                   '\$$_selectedAmount',
-                  style: GoogleFonts.manrope(
+                  style: GoogleFonts.plusJakartaSans(
                     fontSize: 44,
                     fontWeight: FontWeight.w900,
                     color: Colors.white,
@@ -221,7 +206,7 @@ class _AddCreditScreenState extends State<AddCreditScreen> {
               height: 64,
               decoration: BoxDecoration(
                 color: Colors.white.withValues(alpha: 0.15),
-                borderRadius: BorderRadius.circular(18),
+                borderRadius: BorderRadius.circular(AppRadius.xl),
               ),
               child: const Icon(Icons.account_balance_wallet,
                   color: Colors.white, size: 30),
@@ -234,18 +219,11 @@ class _AddCreditScreenState extends State<AddCreditScreen> {
 
   Widget _buildAmountGrid() {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 24),
+      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.pagePadding),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            'Select Amount',
-            style: GoogleFonts.manrope(
-              fontSize: 15,
-              fontWeight: FontWeight.bold,
-              color: const Color(0xFF0F172A),
-            ),
-          ),
+          Text('Select Amount', style: AppTextStyles.sectionHeader),
           const SizedBox(height: 14),
           GridView.builder(
             shrinkWrap: true,
@@ -266,45 +244,49 @@ class _AddCreditScreenState extends State<AddCreditScreen> {
                 child: AnimatedContainer(
                   duration: const Duration(milliseconds: 200),
                   decoration: BoxDecoration(
-                    color: isSelected ? const Color(0xFF135BEC) : Colors.white,
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(
-                      color: isSelected
-                          ? const Color(0xFF135BEC)
-                          : const Color(0xFFE2E8F0),
-                    ),
+                    gradient: isSelected
+                        ? const LinearGradient(
+                            colors: AppColors.primaryGradient)
+                        : null,
+                    color: isSelected ? null : AppColors.surface,
+                    borderRadius: BorderRadius.circular(AppRadius.lg),
+                    border: isSelected
+                        ? null
+                        : Border.all(color: AppColors.border),
                     boxShadow: isSelected
                         ? [
                             BoxShadow(
-                                color: const Color(0xFF135BEC).withValues(alpha: 0.2),
-                                blurRadius: 8,
-                                offset: const Offset(0, 4))
+                              color:
+                                  AppColors.primary.withValues(alpha: 0.25),
+                              blurRadius: 10,
+                              offset: const Offset(0, 4),
+                            ),
                           ]
-                        : [],
+                        : null,
                   ),
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
                       Text(
                         '\$${item['value']}',
-                        style: GoogleFonts.manrope(
+                        style: GoogleFonts.plusJakartaSans(
                           fontSize: 20,
                           fontWeight: FontWeight.w800,
                           color: isSelected
                               ? Colors.white
-                              : const Color(0xFF0F172A),
+                              : AppColors.textPrimary,
                         ),
                       ),
                       if (item['bonus'] != null) ...[
-                        const SizedBox(height: 2),
+                        const SizedBox(height: 3),
                         Text(
                           item['bonus'] as String,
-                          style: GoogleFonts.manrope(
-                            fontSize: 9,
-                            fontWeight: FontWeight.bold,
+                          style: GoogleFonts.dmSans(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w600,
                             color: isSelected
                                 ? Colors.white.withValues(alpha: 0.9)
-                                : const Color(0xFF10B981),
+                                : AppColors.success,
                           ),
                         ),
                       ],
@@ -321,18 +303,12 @@ class _AddCreditScreenState extends State<AddCreditScreen> {
 
   Widget _buildPaymentMethods() {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(24, 24, 24, 8),
+      padding: const EdgeInsets.fromLTRB(
+          AppSpacing.pagePadding, 24, AppSpacing.pagePadding, 8),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            'Payment Method',
-            style: GoogleFonts.manrope(
-              fontSize: 15,
-              fontWeight: FontWeight.bold,
-              color: const Color(0xFF0F172A),
-            ),
-          ),
+          Text('Payment Method', style: AppTextStyles.sectionHeader),
           const SizedBox(height: 14),
           _buildMethodTile(
             id: 'card',
@@ -372,11 +348,10 @@ class _AddCreditScreenState extends State<AddCreditScreen> {
         duration: const Duration(milliseconds: 200),
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
-          color: isSelected ? const Color(0xFFEFF6FF) : Colors.white,
-          borderRadius: BorderRadius.circular(16),
+          color: isSelected ? AppColors.primaryLight : AppColors.surface,
+          borderRadius: BorderRadius.circular(AppRadius.lg),
           border: Border.all(
-            color:
-                isSelected ? const Color(0xFF135BEC) : const Color(0xFFE2E8F0),
+            color: isSelected ? AppColors.primary : AppColors.border,
             width: isSelected ? 1.5 : 1,
           ),
         ),
@@ -386,14 +361,14 @@ class _AddCreditScreenState extends State<AddCreditScreen> {
               padding: const EdgeInsets.all(10),
               decoration: BoxDecoration(
                 color: isSelected
-                    ? const Color(0xFF135BEC).withValues(alpha: 0.1)
-                    : const Color(0xFFF1F5F9),
-                borderRadius: BorderRadius.circular(10),
+                    ? AppColors.primary.withValues(alpha: 0.12)
+                    : AppColors.surfaceBorder,
+                borderRadius: BorderRadius.circular(AppRadius.md),
               ),
               child: Icon(icon,
                   color: isSelected
-                      ? const Color(0xFF135BEC)
-                      : const Color(0xFF64748B),
+                      ? AppColors.primary
+                      : AppColors.textSecondary,
                   size: 20),
             ),
             const SizedBox(width: 14),
@@ -403,19 +378,13 @@ class _AddCreditScreenState extends State<AddCreditScreen> {
                 children: [
                   Text(
                     label,
-                    style: GoogleFonts.manrope(
+                    style: GoogleFonts.plusJakartaSans(
                       fontSize: 14,
-                      fontWeight: FontWeight.bold,
-                      color: const Color(0xFF0F172A),
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.textPrimary,
                     ),
                   ),
-                  Text(
-                    sublabel,
-                    style: GoogleFonts.manrope(
-                      fontSize: 11,
-                      color: const Color(0xFF64748B),
-                    ),
-                  ),
+                  Text(sublabel, style: AppTextStyles.caption),
                 ],
               ),
             ),
@@ -424,10 +393,11 @@ class _AddCreditScreenState extends State<AddCreditScreen> {
                 width: 22,
                 height: 22,
                 decoration: const BoxDecoration(
-                  color: Color(0xFF135BEC),
+                  gradient: LinearGradient(colors: AppColors.primaryGradient),
                   shape: BoxShape.circle,
                 ),
-                child: const Icon(Icons.check, color: Colors.white, size: 14),
+                child:
+                    const Icon(Icons.check, color: Colors.white, size: 14),
               ),
           ],
         ),
@@ -437,34 +407,13 @@ class _AddCreditScreenState extends State<AddCreditScreen> {
 
   Widget _buildAddButton() {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(24, 24, 24, 40),
-      child: SizedBox(
-        width: double.infinity,
-        height: 56,
-        child: ElevatedButton(
-          onPressed: _isLoading ? null : _handleAddCredit,
-          style: ElevatedButton.styleFrom(
-            backgroundColor: const Color(0xFF135BEC),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(18),
-            ),
-            elevation: 0,
-          ),
-          child: _isLoading
-              ? const SizedBox(
-                  width: 24,
-                  height: 24,
-                  child: CircularProgressIndicator(
-                      color: Colors.white, strokeWidth: 2))
-              : Text(
-                  'Add \$$_selectedAmount to Wallet',
-                  style: GoogleFonts.manrope(
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.white,
-                  ),
-                ),
-        ),
+      padding: const EdgeInsets.fromLTRB(
+          AppSpacing.pagePadding, 24, AppSpacing.pagePadding, 40),
+      child: LoadingButton.primary(
+        label: 'Add \$$_selectedAmount to Wallet',
+        onPressed: _handleAddCredit,
+        isLoading: _isLoading,
+        icon: Icons.account_balance_wallet_outlined,
       ),
     );
   }

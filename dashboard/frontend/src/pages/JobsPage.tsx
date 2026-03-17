@@ -21,11 +21,11 @@ function ScoreIndicator({ score }: { score: number }) {
   return (
     <div
       className={cn(
-        "w-9 h-9 rounded-lg flex items-center justify-center text-xs font-bold",
-        score >= 80 ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400" :
-        score >= 60 ? "bg-blue-500/10 text-blue-600 dark:text-blue-400" :
-        score >= 40 ? "bg-amber-500/10 text-amber-600 dark:text-amber-400" :
-        "bg-rose-500/10 text-rose-600 dark:text-rose-400",
+        "w-9 h-9 rounded-xl flex items-center justify-center text-xs font-bold ring-1",
+        score >= 80 ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 ring-emerald-500/20" :
+        score >= 60 ? "bg-blue-500/10 text-blue-600 dark:text-blue-400 ring-blue-500/20" :
+        score >= 40 ? "bg-amber-500/10 text-amber-600 dark:text-amber-400 ring-amber-500/20" :
+        "bg-rose-500/10 text-rose-600 dark:text-rose-400 ring-rose-500/20",
       )}
     >
       {score}
@@ -38,7 +38,7 @@ function GradeBadge({ grade }: { grade: string }) {
     grade === "A" || grade === "A+" ? "success" :
     grade === "B" || grade === "B+" ? "info" :
     grade === "C" || grade === "C+" ? "warning" : "secondary"
-  return <Badge variant={v}>{grade || "—"}</Badge>
+  return <Badge variant={v}>{grade || "\u2014"}</Badge>
 }
 
 export default function JobsPage() {
@@ -67,10 +67,10 @@ export default function JobsPage() {
   })
 
   const handleSync = async () => {
-    toast.info("Syncing...")
+    toast.info("Syncing tracking data...")
     await api.post("/api/jobs/sync")
     refetch()
-    toast.success("Synced")
+    toast.success("Intelligence synchronized")
   }
 
   const toggleSort = (col: string) => {
@@ -80,71 +80,78 @@ export default function JobsPage() {
   }
 
   const SortIcon = ({ col }: { col: string }) => {
-    if (sortBy !== col) return null
-    return sortDir === "asc" ? <ChevronUp size={14} /> : <ChevronDown size={14} />
+    if (sortBy !== col) return <ChevronDown size={14} className="opacity-0 group-hover:opacity-20 transition-opacity" />
+    return sortDir === "asc" ? <ChevronUp size={14} className="text-primary" /> : <ChevronDown size={14} className="text-primary" />
   }
 
   const totalPages = data ? Math.ceil(data.total / data.per_page) : 1
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-8 pb-20">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col md:flex-row md:items-end justify-between gap-6">
         <div>
-          <h2 className="text-2xl font-bold tracking-tight">Jobs</h2>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            {data?.total ?? 0} jobs tracked {syncStatus?.last_synced && <>&middot; Synced {new Date(syncStatus.last_synced).toLocaleTimeString()}</>}
+          <h2 className="text-3xl font-black tracking-tight text-gradient">Mission Control</h2>
+          <p className="text-muted-foreground mt-1.5 font-medium">
+            Managing <span className="text-primary font-bold">{data?.total ?? 0}</span> tracked opportunities {syncStatus?.last_synced && <>&middot; Last synced <span className="text-foreground/60">{new Date(syncStatus.last_synced).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span></>}
           </p>
         </div>
-        <Button variant="outline" size="sm" onClick={handleSync} loading={syncStatus?.syncing}>
-          <RefreshCw size={14} /> Sync Now
-        </Button>
+        <div className="flex items-center gap-3">
+          <div className="relative group">
+            <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-muted-foreground group-focus-within:text-primary transition-colors" />
+            <Input
+              placeholder="Search missions..."
+              value={search}
+              onChange={(e) => { setSearch(e.target.value); setPage(1) }}
+              className="pl-10 w-64 bg-card/40 border-border/40 focus:ring-primary/20 rounded-2xl h-11 transition-all"
+            />
+          </div>
+          <Button variant="outline" size="lg" onClick={handleSync} loading={syncStatus?.syncing} className="rounded-2xl h-11 px-4 border-border/40 font-bold glass-morphism shadow-sm group">
+            <RefreshCw size={16} className={cn("mr-2 group-hover:rotate-180 transition-transform duration-500", syncStatus?.syncing && "animate-spin")} />
+            Sync Results
+          </Button>
+        </div>
       </div>
 
       {/* Filters */}
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="p-1 px-1.5 bg-muted/30 rounded-2xl w-fit flex items-center gap-1 border border-border/20">
         {STATUS_FILTERS.map((s) => (
-          <Button
+          <button
             key={s}
-            size="sm"
-            variant={status === s ? "default" : "outline"}
             onClick={() => { setStatus(s); setPage(1) }}
+            className={cn(
+              "px-5 py-2.5 rounded-xl text-[11px] font-black uppercase tracking-widest transition-all duration-300 cursor-pointer",
+              status === s
+                ? "bg-card text-primary shadow-lg shadow-black/5 border border-border/40"
+                : "text-muted-foreground/60 hover:text-foreground hover:bg-white/5",
+            )}
           >
             {s}
-          </Button>
+          </button>
         ))}
-        <div className="relative ml-auto">
-          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            placeholder="Search jobs..."
-            value={search}
-            onChange={(e) => { setSearch(e.target.value); setPage(1) }}
-            className="pl-9 w-64"
-          />
-        </div>
       </div>
 
       {/* Table */}
-      <Card>
+      <Card className="border-border/40 glass-morphism overflow-hidden shadow-xl">
         <CardContent className="p-0">
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+          <div className="overflow-x-auto custom-scrollbar">
+            <table className="w-full">
               <thead>
-                <tr className="border-b bg-muted/30">
+                <tr className="border-b border-border/20 bg-muted/5">
                   {[
-                    { key: "title", label: "Title" },
-                    { key: "company", label: "Company" },
-                    { key: "score", label: "Score" },
-                    { key: "grade", label: "Grade" },
+                    { key: "title", label: "Intelligence Subject" },
+                    { key: "company", label: "Organization" },
+                    { key: "score", label: "Match" },
+                    { key: "grade", label: "Tier" },
                     { key: "app_status", label: "Status" },
-                    { key: "date_logged", label: "Date" },
+                    { key: "date_logged", label: "Acquired" },
                   ].map(({ key, label }) => (
                     <th
                       key={key}
-                      className="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider cursor-pointer hover:text-foreground transition-colors select-none"
+                      className="px-6 py-4 text-left text-[10px] font-black text-muted-foreground/40 uppercase tracking-widest cursor-pointer hover:bg-muted/10 transition-colors select-none group"
                       onClick={() => toggleSort(key)}
                     >
-                      <span className="inline-flex items-center gap-1">
+                      <span className="flex items-center gap-2">
                         {label}
                         <SortIcon col={key} />
                       </span>
@@ -152,26 +159,27 @@ export default function JobsPage() {
                   ))}
                 </tr>
               </thead>
-              <tbody>
+              <tbody className="divide-y divide-border/20">
                 {isLoading ? (
-                  Array.from({ length: 5 }).map((_, i) => (
-                    <tr key={i} className="border-b">
-                      <td className="px-4 py-3"><div className="h-4 bg-muted rounded animate-pulse w-48" /></td>
-                      <td className="px-4 py-3"><div className="h-4 bg-muted rounded animate-pulse w-28" /></td>
-                      <td className="px-4 py-3"><div className="h-9 w-9 bg-muted rounded-lg animate-pulse" /></td>
-                      <td className="px-4 py-3"><div className="h-5 bg-muted rounded-full animate-pulse w-10" /></td>
-                      <td className="px-4 py-3"><div className="h-5 bg-muted rounded-full animate-pulse w-16" /></td>
-                      <td className="px-4 py-3"><div className="h-4 bg-muted rounded animate-pulse w-24" /></td>
+                  Array.from({ length: 8 }).map((_, i) => (
+                    <tr key={i} className="bg-card/20 border-b border-border/10">
+                      <td className="px-6 py-5"><div className="h-4 shimmer rounded w-48 opacity-40" /></td>
+                      <td className="px-6 py-5"><div className="h-4 shimmer rounded w-28 opacity-40" /></td>
+                      <td className="px-6 py-5"><div className="h-10 w-10 shimmer rounded-2xl opacity-40" /></td>
+                      <td className="px-6 py-5"><div className="h-5 shimmer rounded-lg w-10 opacity-40" /></td>
+                      <td className="px-6 py-5"><div className="h-6 shimmer rounded-full w-20 opacity-40" /></td>
+                      <td className="px-6 py-5"><div className="h-4 shimmer rounded w-24 opacity-40" /></td>
                     </tr>
                   ))
                 ) : data?.jobs.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="px-4 py-16 text-center">
-                      <div className="w-12 h-12 rounded-2xl bg-muted/50 flex items-center justify-center mx-auto mb-3">
-                        <Briefcase size={24} className="text-muted-foreground/40" />
+                    <td colSpan={6} className="px-6 py-28 text-center bg-card/10">
+                      <div className="w-16 h-16 rounded-3xl bg-muted/30 flex items-center justify-center mx-auto mb-5 border border-border/20 shadow-inner group transition-transform duration-500 hover:scale-110">
+                        <Briefcase size={28} className="text-muted-foreground/30 group-hover:text-primary/40" />
                       </div>
-                      <p className="text-sm font-medium text-muted-foreground">No jobs found</p>
-                      <p className="text-xs text-muted-foreground/60 mt-1">Try adjusting your filters or sync from Google Sheets</p>
+                      <p className="text-lg font-bold text-muted-foreground/80">Zero Intelligence Results</p>
+                      <p className="text-xs text-muted-foreground/40 mt-1 max-w-[280px] mx-auto font-medium">Try recalibrating your search parameters or synchronize your discovery feed.</p>
+                      <Button variant="outline" className="mt-8 rounded-xl font-bold border-border/60" onClick={() => {setStatus("All"); setSearch("")}}>Reset Parameters</Button>
                     </td>
                   </tr>
                 ) : (
@@ -182,20 +190,37 @@ export default function JobsPage() {
                       return sortDir === "desc" ? db - da : da - db
                     }
                     return 0
-                  }).map((job) => (
+                  }).map((job, i) => (
                     <tr
                       key={job.id}
-                      className="border-b hover:bg-muted/30 cursor-pointer transition-colors"
+                      className="group bg-card/10 hover:bg-primary/[0.03] cursor-pointer transition-all duration-300 animate-slide-up"
+                      style={{ animationDelay: `${i * 20}ms` }}
                       onClick={() => navigate(`/jobs/${job.id}`)}
                     >
-                      <td className="px-4 py-3">
-                        <span className="font-medium max-w-xs truncate block">{job.title}</span>
+                      <td className="px-6 py-5 min-w-[300px]">
+                        <div className="flex flex-col gap-1">
+                          <span className="font-bold text-foreground/90 group-hover:text-primary transition-colors truncate block">{job.title}</span>
+                          <span className="text-[10px] text-muted-foreground font-bold italic opacity-40 uppercase tracking-tighter">REF# JOB-{job.id.toString().padStart(4, "0")}</span>
+                        </div>
                       </td>
-                      <td className="px-4 py-3 text-muted-foreground">{job.company}</td>
-                      <td className="px-4 py-3"><ScoreIndicator score={job.score} /></td>
-                      <td className="px-4 py-3"><GradeBadge grade={job.grade} /></td>
-                      <td className="px-4 py-3"><StatusBadge status={job.app_status} /></td>
-                      <td className="px-4 py-3 text-muted-foreground text-xs tabular-nums">{formatDate(job.date_logged)}</td>
+                      <td className="px-6 py-5">
+                        <span className="text-sm font-bold text-muted-foreground/80">{job.company}</span>
+                      </td>
+                      <td className="px-6 py-5">
+                        <ScoreIndicator score={job.score} />
+                      </td>
+                      <td className="px-6 py-5">
+                        <GradeBadge grade={job.grade} />
+                      </td>
+                      <td className="px-6 py-5">
+                        <StatusBadge status={job.app_status} />
+                      </td>
+                      <td className="px-6 py-5">
+                        <div className="flex flex-col items-start">
+                          <span className="text-xs font-black tabular-nums text-muted-foreground/60">{formatDate(job.date_logged)}</span>
+                          <span className="text-[10px] text-muted-foreground/30 font-bold uppercase tracking-tight">{new Date(parseDate(job.date_logged)||0).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                        </div>
+                      </td>
                     </tr>
                   ))
                 )}
@@ -207,12 +232,18 @@ export default function JobsPage() {
 
       {/* Pagination */}
       {totalPages > 1 && (
-        <div className="flex items-center justify-between">
-          <span className="text-sm text-muted-foreground">{data?.total} jobs total</span>
-          <div className="flex items-center gap-2">
-            <Button size="sm" variant="outline" disabled={page <= 1} onClick={() => setPage(page - 1)}>Previous</Button>
-            <span className="text-sm tabular-nums text-muted-foreground px-2">{page} of {totalPages}</span>
-            <Button size="sm" variant="outline" disabled={page >= totalPages} onClick={() => setPage(page + 1)}>Next</Button>
+        <div className="flex items-center justify-between px-2">
+          <span className="text-xs font-black uppercase tracking-widest text-muted-foreground/40">{data?.total} Opportunities Tracked</span>
+          <div className="flex items-center gap-1.5 p-1 bg-muted/20 rounded-2xl border border-border/20">
+            <Button size="icon" variant="ghost" disabled={page <= 1} onClick={() => setPage(page - 1)} className="rounded-xl h-9 w-9 border border-transparent hover:border-border/40 hover:bg-card">
+              <ChevronUp size={18} className="-rotate-90" />
+            </Button>
+            <div className="px-4 py-1.5 rounded-xl bg-card border border-border/40 shadow-sm">
+              <span className="text-xs font-black tabular-nums">{page} <span className="text-muted-foreground/40 font-bold mx-1">/</span> {totalPages}</span>
+            </div>
+            <Button size="icon" variant="ghost" disabled={page >= totalPages} onClick={() => setPage(page + 1)} className="rounded-xl h-9 w-9 border border-transparent hover:border-border/40 hover:bg-card">
+              <ChevronUp size={18} className="rotate-90" />
+            </Button>
           </div>
         </div>
       )}

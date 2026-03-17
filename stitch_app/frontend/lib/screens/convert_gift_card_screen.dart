@@ -4,6 +4,10 @@ import 'package:provider/provider.dart';
 
 import '../services/app_state.dart';
 import '../services/api_service.dart';
+import '../theme/app_theme.dart';
+import '../components/merchant_grid.dart';
+import '../components/loading_button.dart';
+import '../components/error_banner.dart';
 
 class ConvertGiftCardScreen extends StatefulWidget {
   const ConvertGiftCardScreen({super.key});
@@ -13,44 +17,13 @@ class ConvertGiftCardScreen extends StatefulWidget {
 }
 
 class _ConvertGiftCardScreenState extends State<ConvertGiftCardScreen> {
+  int _step = 0; // 0: merchant, 1: details, 2: preview
   String _selectedMerchant = 'Amazon';
   final _cardNumberController = TextEditingController();
   final _pinController = TextEditingController();
   final _amountController = TextEditingController();
   bool _isConverting = false;
-
-  final List<Map<String, dynamic>> _merchants = [
-    {
-      'name': 'Amazon',
-      'icon': Icons.shopping_bag_outlined,
-      'gradient': [const Color(0xFFF97316), const Color(0xFFEF4444)]
-    },
-    {
-      'name': 'iTunes',
-      'icon': Icons.music_note_outlined,
-      'gradient': [const Color(0xFFEC4899), const Color(0xFFBE185D)]
-    },
-    {
-      'name': 'Google Play',
-      'icon': Icons.play_circle_outline,
-      'gradient': [const Color(0xFF10B981), const Color(0xFF059669)]
-    },
-    {
-      'name': 'Steam',
-      'icon': Icons.videogame_asset_outlined,
-      'gradient': [const Color(0xFF6366F1), const Color(0xFF4338CA)]
-    },
-    {
-      'name': 'Walmart',
-      'icon': Icons.store_outlined,
-      'gradient': [const Color(0xFF0EA5E9), const Color(0xFF0284C7)]
-    },
-    {
-      'name': 'eBay',
-      'icon': Icons.storefront_outlined,
-      'gradient': [const Color(0xFFF59E0B), const Color(0xFFD97706)]
-    },
-  ];
+  String? _error;
 
   @override
   void initState() {
@@ -66,19 +39,46 @@ class _ConvertGiftCardScreenState extends State<ConvertGiftCardScreen> {
     super.dispose();
   }
 
+  double get _estimatedValue {
+    final parsed = double.tryParse(_amountController.text) ?? 0;
+    return parsed * 0.9;
+  }
+
+  bool get _canProceedToStep1 => _selectedMerchant.isNotEmpty;
+
+  bool get _canProceedToStep2 =>
+      _cardNumberController.text.isNotEmpty &&
+      (double.tryParse(_amountController.text) ?? 0) > 0;
+
+  void _nextStep() {
+    if (_step == 0 && _canProceedToStep1) {
+      setState(() => _step = 1);
+    } else if (_step == 1 && _canProceedToStep2) {
+      setState(() => _step = 2);
+    }
+  }
+
+  void _prevStep() {
+    if (_step > 0) {
+      setState(() => _step--);
+    } else if (Navigator.canPop(context)) {
+      Navigator.pop(context);
+    }
+  }
+
   Future<void> _handleConvert() async {
     final amount = double.tryParse(_amountController.text);
     if (_cardNumberController.text.isEmpty || amount == null || amount <= 0) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Please fill in card number and a valid amount'),
-          backgroundColor: Color(0xFFDC2626),
-        ),
-      );
+      setState(
+          () => _error = 'Please fill in card number and a valid amount');
       return;
     }
 
-    setState(() => _isConverting = true);
+    setState(() {
+      _isConverting = true;
+      _error = null;
+    });
+
     try {
       final appState = Provider.of<AppState>(context, listen: false);
       final result = await ApiService.convertGiftCard(
@@ -94,32 +94,20 @@ class _ConvertGiftCardScreenState extends State<ConvertGiftCardScreen> {
         await appState.refreshWallet();
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-                '\$${result['addedValue']} UniCredit added to your wallet!'),
-            backgroundColor: const Color(0xFF16A34A),
-          ),
+          AppWidgets.successSnackBar(
+              '\$${result['addedValue']} added to your wallet!'),
         );
         _cardNumberController.clear();
         _pinController.clear();
         _amountController.clear();
         if (Navigator.canPop(context)) Navigator.pop(context);
       } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(result['error'] ?? 'Conversion failed'),
-            backgroundColor: const Color(0xFFDC2626),
-          ),
-        );
+        setState(
+            () => _error = result['error'] ?? 'Conversion failed');
       }
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Something went wrong. Please try again.'),
-          backgroundColor: Color(0xFFDC2626),
-        ),
-      );
+      setState(() => _error = 'Something went wrong. Please try again.');
     } finally {
       if (mounted) setState(() => _isConverting = false);
     }
@@ -128,30 +116,32 @@ class _ConvertGiftCardScreenState extends State<ConvertGiftCardScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: AppColors.background,
       body: SafeArea(
         child: Column(
           children: [
             _buildHeader(context),
             _buildProgressBar(),
+            if (_error != null)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(
+                    AppSpacing.pagePadding, 16, AppSpacing.pagePadding, 0),
+                child: ErrorBanner(
+                  message: _error!,
+                  onDismiss: () => setState(() => _error = null),
+                ),
+              ),
             Expanded(
               child: SingleChildScrollView(
-                padding: const EdgeInsets.symmetric(horizontal: 24),
+                padding: const EdgeInsets.symmetric(
+                    horizontal: AppSpacing.pagePadding),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     const SizedBox(height: 24),
-                    _buildMerchantSection(),
-                    const SizedBox(height: 28),
-                    _buildCardDetailsSection(),
-                    const SizedBox(height: 28),
-                    _buildEstimatedValueSection(),
-                    const SizedBox(height: 28),
-                    _buildExchangeRateNote(),
-                    const SizedBox(height: 32),
-                    _buildConvertButton(),
-                    const SizedBox(height: 12),
-                    _buildDisclaimer(),
+                    if (_step == 0) _buildStep0Merchant(),
+                    if (_step == 1) _buildStep1Details(),
+                    if (_step == 2) _buildStep2Preview(),
                     const SizedBox(height: 32),
                   ],
                 ),
@@ -165,52 +155,59 @@ class _ConvertGiftCardScreenState extends State<ConvertGiftCardScreen> {
 
   Widget _buildHeader(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+      padding: const EdgeInsets.fromLTRB(
+          AppSpacing.pagePadding, AppSpacing.headerTop, AppSpacing.pagePadding, 0),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          if (Navigator.canPop(context))
-            IconButton(
-              icon: const Icon(Icons.arrow_back_ios_new, size: 20),
-              onPressed: () => Navigator.pop(context),
-            )
-          else
-            const SizedBox(width: 38),
-          Text(
-            'Convert Gift Card',
-            style: GoogleFonts.manrope(
-              fontSize: 16,
-              fontWeight: FontWeight.bold,
-              color: const Color(0xFF0F172A),
+          GestureDetector(
+            onTap: _prevStep,
+            child: Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                color: AppColors.surface,
+                shape: BoxShape.circle,
+                border: Border.all(color: AppColors.border),
+              ),
+              child: Icon(
+                _step > 0 ? Icons.arrow_back_ios_new : Icons.close,
+                size: 18,
+                color: AppColors.textPrimary,
+              ),
             ),
           ),
-          Text('STEP 1 OF 3',
-              style: GoogleFonts.manrope(
-                  fontSize: 10,
-                  fontWeight: FontWeight.bold,
-                  color: const Color(0xFF135BEC))),
+          Text('Convert Gift Card', style: AppTextStyles.screenTitle),
+          Text(
+            'STEP ${_step + 1} OF 3',
+            style: GoogleFonts.plusJakartaSans(
+              fontSize: 10,
+              fontWeight: FontWeight.w700,
+              color: AppColors.primary,
+              letterSpacing: 0.5,
+            ),
+          ),
         ],
       ),
     );
   }
 
   Widget _buildProgressBar() {
+    final labels = ['Select merchant', 'Enter card details', 'Preview & confirm'];
     return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
+      padding: const EdgeInsets.fromLTRB(
+          AppSpacing.pagePadding, 12, AppSpacing.pagePadding, 0),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('Select your gift card',
-              style: GoogleFonts.manrope(
-                  fontSize: 11, color: const Color(0xFF94A3B8))),
+          Text(labels[_step], style: AppTextStyles.caption),
           const SizedBox(height: 8),
           ClipRRect(
             borderRadius: BorderRadius.circular(4),
-            child: const LinearProgressIndicator(
-              value: 1 / 3,
-              backgroundColor: Color(0xFFE2E8F0),
-              valueColor:
-                  AlwaysStoppedAnimation<Color>(Color(0xFF135BEC)),
+            child: LinearProgressIndicator(
+              value: (_step + 1) / 3,
+              backgroundColor: AppColors.border,
+              valueColor: const AlwaysStoppedAnimation<Color>(AppColors.primary),
               minHeight: 4,
             ),
           ),
@@ -219,117 +216,55 @@ class _ConvertGiftCardScreenState extends State<ConvertGiftCardScreen> {
     );
   }
 
-  Widget _buildMerchantSection() {
+  // ─── Step 0: Merchant Selection ──────────────────────────────────────────
+
+  Widget _buildStep0Merchant() {
     return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            Text('Choose a Merchant',
-                style: GoogleFonts.manrope(
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold,
-                    color: const Color(0xFF0F172A))),
-            Text('See All',
-                style: GoogleFonts.manrope(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    color: const Color(0xFF135BEC))),
+            Text('Choose a Merchant', style: AppTextStyles.sectionHeader),
+            Text('See All', style: AppTextStyles.link.copyWith(fontSize: 12)),
           ],
         ),
-        Padding(
-          padding: const EdgeInsets.only(top: 14),
-          child: Wrap(
-            spacing: 10,
-            runSpacing: 10,
-            children: _merchants.map((merchant) {
-              final isSelected =
-                  _selectedMerchant == merchant['name'] as String;
-              final gradientColors = merchant['gradient'] as List<Color>;
-              return GestureDetector(
-                onTap: () => setState(
-                    () => _selectedMerchant = merchant['name'] as String),
-                child: AnimatedContainer(
-                  width: (MediaQuery.of(context).size.width - 48 - 20) / 3,
-                  duration: const Duration(milliseconds: 200),
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                  decoration: BoxDecoration(
-                    gradient: isSelected
-                        ? LinearGradient(
-                            begin: Alignment.topLeft,
-                            end: Alignment.bottomRight,
-                            colors: gradientColors,
-                          )
-                        : null,
-                    color: isSelected ? null : const Color(0xFFF8FAFC),
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(
-                      color: isSelected
-                          ? Colors.transparent
-                          : const Color(0xFFE2E8F0),
-                      width: 1,
-                    ),
-                    boxShadow: isSelected
-                        ? [
-                            BoxShadow(
-                                color: gradientColors[0].withValues(alpha: 0.3),
-                                blurRadius: 12,
-                                offset: const Offset(0, 6))
-                          ]
-                        : [],
-                  ),
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(
-                        merchant['icon'] as IconData,
-                        color:
-                            isSelected ? Colors.white : const Color(0xFF64748B),
-                        size: 26,
-                      ),
-                      const SizedBox(height: 6),
-                      Text(
-                        merchant['name'] as String,
-                        style: GoogleFonts.manrope(
-                          fontSize: 10,
-                          fontWeight: FontWeight.bold,
-                          color: isSelected
-                              ? Colors.white
-                              : const Color(0xFF64748B),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              );
-            }).toList(),
-          ),
+        const SizedBox(height: 16),
+        MerchantGrid(
+          selectedMerchant: _selectedMerchant,
+          onSelected: (m) => setState(() => _selectedMerchant = m),
+        ),
+        const SizedBox(height: 28),
+        _buildExchangeRateNote(),
+        const SizedBox(height: 28),
+        LoadingButton.primary(
+          label: 'Continue',
+          onPressed: _nextStep,
+          enabled: _canProceedToStep1,
+          icon: Icons.arrow_forward,
         ),
       ],
     );
   }
 
-  Widget _buildCardDetailsSection() {
+  // ─── Step 1: Card Details ────────────────────────────────────────────────
+
+  Widget _buildStep1Details() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text('Enter Card Details',
-            style: GoogleFonts.manrope(
-                fontSize: 16,
-                fontWeight: FontWeight.bold,
-                color: const Color(0xFF0F172A))),
-        const SizedBox(height: 14),
+        Text('Enter Card Details', style: AppTextStyles.sectionHeader),
+        const SizedBox(height: 16),
         _buildInputField(
           label: 'Card Number',
           hint: 'e.g. XXXX-XXXX-XXXX-XXXX',
           icon: Icons.credit_card_outlined,
           controller: _cardNumberController,
-          suffixIcon: Icons.content_paste_outlined,
         ),
         const SizedBox(height: 14),
         _buildInputField(
           label: 'PIN / Security Code',
-          hint: 'Enter PIN',
+          hint: 'Enter PIN (optional)',
           icon: Icons.lock_outline,
           controller: _pinController,
           obscure: true,
@@ -342,48 +277,114 @@ class _ConvertGiftCardScreenState extends State<ConvertGiftCardScreen> {
           controller: _amountController,
           keyboardType: TextInputType.number,
         ),
+        const SizedBox(height: 24),
+        _buildEstimatedValueCard(),
+        const SizedBox(height: 28),
+        LoadingButton.primary(
+          label: 'Preview Conversion',
+          onPressed: _nextStep,
+          enabled: _canProceedToStep2,
+          icon: Icons.arrow_forward,
+        ),
       ],
     );
   }
+
+  // ─── Step 2: Preview & Confirm ───────────────────────────────────────────
+
+  Widget _buildStep2Preview() {
+    final amount = double.tryParse(_amountController.text) ?? 0;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('Conversion Preview', style: AppTextStyles.sectionHeader),
+        const SizedBox(height: 16),
+        Container(
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            color: AppColors.surface,
+            borderRadius: BorderRadius.circular(AppRadius.card),
+            border: Border.all(color: AppColors.surfaceBorder),
+          ),
+          child: Column(
+            children: [
+              _buildPreviewRow('Merchant', _selectedMerchant),
+              const Divider(height: 24, color: AppColors.surfaceBorder),
+              _buildPreviewRow('Card Number',
+                  _cardNumberController.text.replaceRange(
+                    0, (_cardNumberController.text.length > 4)
+                        ? _cardNumberController.text.length - 4
+                        : 0,
+                    '*' * ((_cardNumberController.text.length > 4)
+                        ? _cardNumberController.text.length - 4
+                        : 0),
+                  )),
+              const Divider(height: 24, color: AppColors.surfaceBorder),
+              _buildPreviewRow('Card Value', '\$${amount.toStringAsFixed(2)}'),
+              const Divider(height: 24, color: AppColors.surfaceBorder),
+              _buildPreviewRow('Exchange Rate', '90%'),
+              const Divider(height: 24, color: AppColors.surfaceBorder),
+              _buildPreviewRow(
+                'You Receive',
+                '\$${_estimatedValue.toStringAsFixed(2)}',
+                valueColor: AppColors.success,
+                isBold: true,
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 28),
+        LoadingButton.primary(
+          label: 'Convert Gift Card',
+          onPressed: _handleConvert,
+          isLoading: _isConverting,
+          icon: Icons.check_circle_outline,
+        ),
+        const SizedBox(height: 12),
+        Center(
+          child: Text(
+            'By continuing, you agree to our Terms of Service\nand Privacy Policy',
+            style: AppTextStyles.caption,
+            textAlign: TextAlign.center,
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ─── Shared Widgets ──────────────────────────────────────────────────────
 
   Widget _buildInputField({
     required String label,
     required String hint,
     required IconData icon,
     required TextEditingController controller,
-    IconData? suffixIcon,
     bool obscure = false,
     TextInputType? keyboardType,
   }) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(label,
-            style: GoogleFonts.manrope(
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
-                color: const Color(0xFF374151))),
+        Text(label, style: AppTextStyles.fieldLabel),
         const SizedBox(height: 8),
         Container(
           decoration: BoxDecoration(
-            color: const Color(0xFFF8FAFC),
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: const Color(0xFFE2E8F0)),
+            color: AppColors.surfaceElevated,
+            borderRadius: BorderRadius.circular(AppRadius.input),
+            border: Border.all(color: AppColors.border),
           ),
           child: TextField(
             controller: controller,
             obscureText: obscure,
             keyboardType: keyboardType,
-            style: GoogleFonts.manrope(
-                fontSize: 14, color: const Color(0xFF0F172A)),
+            style: GoogleFonts.dmSans(
+                fontSize: 14, color: AppColors.textPrimary),
             decoration: InputDecoration(
-              prefixIcon: Icon(icon, color: const Color(0xFF94A3B8), size: 20),
-              suffixIcon: suffixIcon != null
-                  ? Icon(suffixIcon, color: const Color(0xFF94A3B8), size: 18)
-                  : null,
+              prefixIcon:
+                  Icon(icon, color: AppColors.textTertiary, size: 20),
               hintText: hint,
-              hintStyle: GoogleFonts.manrope(
-                  fontSize: 13, color: const Color(0xFFCBD5E1)),
+              hintStyle:
+                  GoogleFonts.dmSans(fontSize: 13, color: AppColors.textHint),
               border: InputBorder.none,
               contentPadding:
                   const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
@@ -394,58 +395,47 @@ class _ConvertGiftCardScreenState extends State<ConvertGiftCardScreen> {
     );
   }
 
-  double get _estimatedValue {
-    final parsed = double.tryParse(_amountController.text) ?? 0;
-    return parsed * 0.9;
-  }
-
-  Widget _buildEstimatedValueSection() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text('Estimated Value',
-            style: GoogleFonts.manrope(
-                fontSize: 14,
-                fontWeight: FontWeight.w600,
-                color: const Color(0xFF374151))),
-        const SizedBox(height: 10),
-        Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: const Color(0xFFF0FDF4),
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: const Color(0xFFBBF7D0)),
-          ),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+  Widget _buildEstimatedValueCard() {
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: AppColors.successLight,
+        borderRadius: BorderRadius.circular(AppRadius.lg),
+        border: Border.all(color: const Color(0xFFBBF7D0)),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text('You will receive',
-                      style: GoogleFonts.manrope(
-                          fontSize: 11, color: const Color(0xFF16A34A))),
-                  const SizedBox(height: 4),
-                  Text('\$${_estimatedValue.toStringAsFixed(2)} UniCredit',
-                      style: GoogleFonts.manrope(
-                          fontSize: 22,
-                          fontWeight: FontWeight.w800,
-                          color: const Color(0xFF15803D))),
-                ],
+              Text(
+                'You will receive',
+                style: GoogleFonts.dmSans(
+                    fontSize: 12, color: AppColors.success),
               ),
-              Container(
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF16A34A).withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(12),
+              const SizedBox(height: 4),
+              Text(
+                '\$${_estimatedValue.toStringAsFixed(2)} Stitch Credit',
+                style: GoogleFonts.plusJakartaSans(
+                  fontSize: 22,
+                  fontWeight: FontWeight.w800,
+                  color: const Color(0xFF15803D),
                 ),
-                child: const Icon(Icons.account_balance_wallet_outlined,
-                    color: Color(0xFF16A34A), size: 26),
               ),
             ],
           ),
-        ),
-      ],
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: AppColors.success.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(AppRadius.md),
+            ),
+            child: const Icon(Icons.account_balance_wallet_outlined,
+                color: AppColors.success, size: 26),
+          ),
+        ],
+      ),
     );
   }
 
@@ -453,34 +443,38 @@ class _ConvertGiftCardScreenState extends State<ConvertGiftCardScreen> {
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: const Color(0xFFF8FAFF),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0xFFDFE8FF)),
+        color: AppColors.primaryLight.withValues(alpha: 0.5),
+        borderRadius: BorderRadius.circular(AppRadius.md),
+        border: Border.all(color: AppColors.primary.withValues(alpha: 0.15)),
       ),
       child: Row(
         children: [
           Container(
             padding: const EdgeInsets.all(6),
             decoration: BoxDecoration(
-              color: const Color(0xFF135BEC).withValues(alpha: 0.1),
-              borderRadius: BorderRadius.circular(8),
+              color: AppColors.primary.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(AppRadius.sm),
             ),
             child: const Icon(Icons.currency_exchange,
-                color: Color(0xFF135BEC), size: 16),
+                color: AppColors.primary, size: 16),
           ),
           const SizedBox(width: 12),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text("Today's Exchange Rate",
-                    style: GoogleFonts.manrope(
-                        fontSize: 12,
-                        fontWeight: FontWeight.bold,
-                        color: const Color(0xFF0F172A))),
-                Text('1 GC = 0.90 UniCredit  •  90% rate',
-                    style: GoogleFonts.manrope(
-                        fontSize: 11, color: const Color(0xFF64748B))),
+                Text(
+                  "Today's Exchange Rate",
+                  style: GoogleFonts.plusJakartaSans(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.textPrimary,
+                  ),
+                ),
+                Text(
+                  '1 GC = 0.90 Stitch Credit  |  90% rate',
+                  style: AppTextStyles.caption,
+                ),
               ],
             ),
           ),
@@ -489,43 +483,21 @@ class _ConvertGiftCardScreenState extends State<ConvertGiftCardScreen> {
     );
   }
 
-  Widget _buildConvertButton() {
-    return SizedBox(
-      width: double.infinity,
-      height: 54,
-      child: ElevatedButton(
-        onPressed: _isConverting ? null : _handleConvert,
-        style: ElevatedButton.styleFrom(
-          backgroundColor: const Color(0xFF135BEC),
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          elevation: 0,
+  Widget _buildPreviewRow(String label, String value,
+      {Color? valueColor, bool isBold = false}) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Text(label, style: AppTextStyles.bodySmall),
+        Text(
+          value,
+          style: GoogleFonts.plusJakartaSans(
+            fontSize: isBold ? 16 : 14,
+            fontWeight: isBold ? FontWeight.w800 : FontWeight.w600,
+            color: valueColor ?? AppColors.textPrimary,
+          ),
         ),
-        child: _isConverting
-            ? const SizedBox(
-                width: 24,
-                height: 24,
-                child: CircularProgressIndicator(
-                    color: Colors.white, strokeWidth: 2))
-            : Text(
-                'Convert Gift Card',
-                style: GoogleFonts.manrope(
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.white),
-              ),
-      ),
-    );
-  }
-
-  Widget _buildDisclaimer() {
-    return Center(
-      child: Text(
-        'By continuing, you agree to our Terms of Service\nand Privacy Policy',
-        style:
-            GoogleFonts.manrope(fontSize: 10, color: const Color(0xFF94A3B8)),
-        textAlign: TextAlign.center,
-      ),
+      ],
     );
   }
 }

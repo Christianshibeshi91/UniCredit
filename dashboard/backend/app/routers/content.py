@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth import require_auth
 from app.core.database import get_session
-from app.core.config import PROJECT_ROOT, TMP_DIR, CANDIDATE_DIR
+from app.core.config import PROJECT_ROOT, TMP_DIR
 from app.models.job import Job
 
 router = APIRouter(prefix="/api/content", tags=["content"], dependencies=[Depends(require_auth)])
@@ -18,53 +18,33 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 
-def _load_profile() -> dict:
-    import json
-    profile_path = CANDIDATE_DIR / "profile.json"
-    if profile_path.exists():
-        return json.loads(profile_path.read_text(encoding="utf-8"))
-    return {}
-
-
 async def _run_in_executor(func, *args):
     loop = asyncio.get_event_loop()
     return await loop.run_in_executor(None, func, *args)
 
 
-@router.post("/resume/{job_id}")
-async def regenerate_resume(job_id: int, session: AsyncSession = Depends(get_session)):
+@router.get("/resume/{job_id}")
+async def get_resume(job_id: int, session: AsyncSession = Depends(get_session)):
+    """Return the Google Drive URL for the tailored resume."""
     result = await session.execute(select(Job).where(Job.id == job_id))
     job = result.scalar_one_or_none()
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
-
-    try:
-        from LinkedinAutomation.tailor_resume import tailor
-        profile = _load_profile()
-        job_dict = {"title": job.title, "company": job.company, "description": job.description}
-        score_data = {"matched_skills": job.matched_skills, "missing_skills": job.missing_skills}
-        resume_text = await _run_in_executor(tailor, job_dict, score_data, profile)
-        return {"text": resume_text}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    if not job.resume_url:
+        raise HTTPException(status_code=404, detail="No resume link in Google Sheet for this job")
+    return {"url": job.resume_url, "filename": job.resume_file}
 
 
-@router.post("/cover-letter/{job_id}")
-async def regenerate_cover_letter(job_id: int, session: AsyncSession = Depends(get_session)):
+@router.get("/cover-letter/{job_id}")
+async def get_cover_letter(job_id: int, session: AsyncSession = Depends(get_session)):
+    """Return the Google Drive URL for the tailored cover letter."""
     result = await session.execute(select(Job).where(Job.id == job_id))
     job = result.scalar_one_or_none()
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
-
-    try:
-        from LinkedinAutomation.generate_cover_letter import generate
-        profile = _load_profile()
-        job_dict = {"title": job.title, "company": job.company, "description": job.description}
-        score_data = {"matched_skills": job.matched_skills, "missing_skills": job.missing_skills}
-        cl_text = await _run_in_executor(generate, job_dict, score_data, profile)
-        return {"text": cl_text}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    if not job.cover_letter_url:
+        raise HTTPException(status_code=404, detail="No cover letter link in Google Sheet for this job")
+    return {"url": job.cover_letter_url, "filename": job.cover_letter_file}
 
 
 @router.post("/follow-up-email/{job_id}")

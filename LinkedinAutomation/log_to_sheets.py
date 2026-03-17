@@ -78,7 +78,7 @@ def log_job(job_data: dict) -> int:
         cl_cell,
         job_data.get("application_type", ""),
         job_data.get("application_status", "Pending Review"),
-        datetime.now(PT).strftime("%m/%d/%y %I:%M %p PST"),
+        datetime.now(PT).strftime("%m/%d/%y %I:%M %p ") + datetime.now(PT).strftime("%Z"),
         job_data.get("applied", "No"),
         "",  # Follow-Up Date (column V) — set by follow_up_tracker
         "",  # Follow-Up Status (column W) — set by follow_up_tracker
