@@ -1,5 +1,5 @@
-import Anthropic from "@anthropic-ai/sdk";
-import { client, ANALYSIS_MODEL, withRetry } from "./claudeClient";
+import { Anthropic } from "./claudeClient";
+import { client, ANALYSIS_MODEL, withRetry, isLLMConfigured } from "./claudeClient";
 import {
   getMockURLAnalysisReport,
   getMockComparisonReport,
@@ -417,7 +417,7 @@ async function runRealPipeline(
     ppcKeywords,
     pricingStrategy,
     actionPlan: planResult.data,
-    claudeModel: "claude-opus-4-6",
+    claudeModel: ANALYSIS_MODEL,
     tokenUsage,
     processingTimeMs: Date.now() - startTime,
     createdAt: now,
@@ -537,7 +537,7 @@ export async function runURLAnalysisPipeline(
   url: string,
   onProgress: (event: URLAnalysisSSEEvent) => void,
 ): Promise<URLAnalysisReport> {
-  if (!process.env.ANTHROPIC_API_KEY) {
+  if (!isLLMConfigured) {
     return runMockPipeline(url, onProgress);
   }
   return runRealPipeline(url, onProgress);
@@ -547,7 +547,7 @@ export async function runComparisonPipeline(
   urls: string[],
   onProgress: (event: URLAnalysisSSEEvent) => void,
 ): Promise<ComparisonReport> {
-  if (!process.env.ANTHROPIC_API_KEY) {
+  if (!isLLMConfigured) {
     // Mock: run mock pipelines with short delays
     for (const url of urls) {
       await runMockPipeline(url, onProgress);
@@ -592,7 +592,7 @@ export async function runComparisonPipeline(
     bestInClassByDimension: {},
     combinedActionPlan: "Apply the listing strategies from the highest-graded product to all others.",
     sourcingRecommendation: `The best sourcing opportunity is ${winner.title} based on overall grade and margin potential.`,
-    claudeModel: "claude-opus-4-6",
+    claudeModel: ANALYSIS_MODEL,
     createdAt: new Date().toISOString(),
   };
 }

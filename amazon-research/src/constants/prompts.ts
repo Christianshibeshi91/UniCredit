@@ -1,4 +1,4 @@
-import type Anthropic from "@anthropic-ai/sdk";
+import type { Anthropic } from "@/lib/analysis/claudeClient";
 import type { Product, Review } from "@/lib/types";
 
 export const SYSTEM_PROMPT = `You are an expert Amazon product researcher and market analyst specializing in identifying white-space opportunities in competitive product categories. You analyze customer reviews with surgical precision to extract actionable insights for private-label product development.

@@ -1,4 +1,4 @@
-import type Anthropic from "@anthropic-ai/sdk";
+import type { Anthropic } from "./claudeClient";
 import type { Product, Review, AnalysisResult, Complaint, FeatureRequest } from "@/lib/types";
 import { SYSTEM_PROMPT, SUBMIT_ANALYSIS_TOOL, buildReviewAnalysisPrompt } from "@/constants/prompts";
 import { batchReviews } from "./reviewParser";

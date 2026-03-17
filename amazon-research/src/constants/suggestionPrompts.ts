@@ -1,4 +1,4 @@
-import type Anthropic from "@anthropic-ai/sdk";
+import type { Anthropic } from "@/lib/analysis/claudeClient";
 import type { Product, AnalysisResult, ProductSuggestion } from "@/lib/types";
 
 // ── System Prompts ────────────────────────────────────────────────

@@ -1,4 +1,4 @@
-import type Anthropic from "@anthropic-ai/sdk";
+import type { Anthropic } from "./claudeClient";
 import type {
   IntelligenceReport,
   IntelligenceSSEEvent,
@@ -15,7 +15,7 @@ import type {
   TokenUsage,
   PipelineStage,
 } from "@/lib/types/intelligence";
-import { client, INTELLIGENCE_MODEL, withRetry } from "./claudeClient";
+import { client, INTELLIGENCE_MODEL, withRetry, isLLMConfigured } from "./claudeClient";
 import {
   MARKET_SYNTHESIS_PROMPT,
   PRODUCT_DEFINITION_PROMPT,
@@ -175,7 +175,7 @@ export async function runIntelligencePipeline(
   onProgress: (event: IntelligenceSSEEvent) => void,
 ): Promise<IntelligenceReport> {
   // Mock path — no API key available
-  if (!process.env.ANTHROPIC_API_KEY) {
+  if (!isLLMConfigured) {
     return runMockPipeline(input, onProgress);
   }
 

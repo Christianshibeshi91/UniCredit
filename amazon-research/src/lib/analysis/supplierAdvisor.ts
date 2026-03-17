@@ -1,5 +1,5 @@
 import { client, MODEL, withRetry, circuitBreaker } from "./claudeClient";
-import type Anthropic from "@anthropic-ai/sdk";
+import type { Anthropic } from "./claudeClient";
 import type {
   ProductSuggestion,
   ProductSpec,
