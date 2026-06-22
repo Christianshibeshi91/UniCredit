@@ -1,4 +1,4 @@
-"""ATS-optimized resume tailoring — Ollama/Qwen with template fallback."""
+"""ATS-optimized resume tailoring — OpenRouter (Claude Sonnet) with template fallback."""
 
 import json
 import os
@@ -6,7 +6,7 @@ import re
 from dotenv import load_dotenv  # pyre-ignore[21]
 
 from LinkedinAutomation.alert_user import alert  # pyre-ignore[21]
-from LinkedinAutomation.ollama_client import generate as ollama_generate, is_available as ollama_available, OLLAMA_WRITING_MODEL  # pyre-ignore[21]
+from LinkedinAutomation.openrouter_client import generate as ollama_generate, is_available as ollama_available, OLLAMA_WRITING_MODEL  # pyre-ignore[21]
 from LinkedinAutomation import safe_job_id, load_profile as _safe_load_profile  # pyre-ignore[21]
 
 BASE_DIR = os.path.dirname(os.path.dirname(__file__))
@@ -114,13 +114,13 @@ Title: {job.get('title', 'N/A')}
 Description: {job.get('description', 'N/A')[:1500]}
 
 RULES:
-- Keep "over 8 years of experience" exactly
+- Keep "over 9 years of experience" exactly
 - Do NOT mention the company name "{job.get('company', 'N/A')}"
 - Include keywords from the job description naturally
 - Third person only, no "I" statements
 - No AI phrases like "spearheaded", "synergized", "cutting-edge", "passionate about", "results-driven"
 - Plain text only, no markdown, no preamble, no quotes
-- Start with "Power Platform Developer with over 8 years"
+- Start with "Power Platform Developer with over 9 years"
 
 Output ONLY the summary paragraph:"""
 
@@ -269,13 +269,14 @@ def _local_resume(job, score_data, profile, custom_summary=None,
             matched_lower = {s.lower() for s in matched}
             reordered = {}
             for cat, skills_str in tech_skills.items():
+                # Skills stored comma-separated; convert to pipe-separated for display
                 items = [s.strip() for s in skills_str.split(",")]
                 front = [s for s in items if any(m in s.lower() for m in matched_lower)]
                 back = [s for s in items if s not in front]
-                reordered[cat] = ", ".join(front + back)
+                reordered[cat] = " | ".join(front + back)
             skills_text = "\n".join(f"{cat}: {skills}" for cat, skills in reordered.items())
         else:
-            skills_text = ", ".join(all_skills)
+            skills_text = " | ".join(all_skills)
 
     resume = f"""{profile['name']}
 {contact_line}
@@ -300,15 +301,15 @@ CERTIFICATIONS
 
 
 def tailor(job, score_data, profile=None):
-    """Tailor resume for job. Uses Ollama/Qwen, falls back to template."""
+    """Tailor resume for job. Uses OpenRouter (Claude Sonnet), falls back to template."""
     if profile is None:
         profile = _load_profile()
 
     resume_text = None
 
-    # Try Ollama hybrid: LLM for summary + competencies, template for the rest
+    # Try OpenRouter hybrid: LLM for summary + competencies, template for the rest
     if ollama_available():
-        alert("Resume", f"Using Ollama ({OLLAMA_WRITING_MODEL}) hybrid for resume")
+        alert("Resume", f"Using OpenRouter ({OLLAMA_WRITING_MODEL}) hybrid for resume")
 
         # 1. Get tailored summary from Ollama
         summary_prompt = _build_summary_prompt(job, profile)
@@ -317,7 +318,7 @@ def tailor(job, score_data, profile=None):
             tailored_summary = _clean_output(tailored_summary)
             # Validate: must mention "8 years" and not mention target company
             target_co = job.get("company", "").lower()
-            if "8 year" in tailored_summary.lower() and target_co not in tailored_summary.lower():
+            if "9 year" in tailored_summary.lower() and target_co not in tailored_summary.lower():
                 alert("Resume", "Ollama summary accepted")
             else:
                 alert("Resume", "Ollama summary failed validation, using profile summary", "warning")
