@@ -40,8 +40,11 @@ def alert(title: str, message: str, level: str = "info") -> None:
     else:
         logger.info(msg)
 
-    # Skip desktop notifications on headless Linux (plyer D-Bus timeout)
-    if sys.platform != "linux" or os.environ.get("DISPLAY"):
+    # Desktop notifications: only attempt on Windows or graphical Linux.
+    # Headless Linux VPS (no DISPLAY) silently skips — avoids D-Bus / Shell_NotifyIconW errors.
+    _is_windows = sys.platform == "win32"
+    _has_display = bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
+    if _is_windows or _has_display:
         try:
             from plyer import notification  # pyre-ignore[21]
             notification.notify(  # pyre-ignore[16]

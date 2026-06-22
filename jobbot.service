@@ -5,14 +5,15 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=chris
-WorkingDirectory=/home/chris/Anti-gravity
-ExecStart=/home/chris/Anti-gravity/venv/bin/python run_service.py
+User=ec2-user
+WorkingDirectory=/home/ec2-user/Anti-gravity
+ExecStart=/home/ec2-user/Anti-gravity/venv/bin/python run_service.py
 Restart=always
 RestartSec=30
-StandardOutput=append:/home/chris/Anti-gravity/.tmp/service.log
-StandardError=append:/home/chris/Anti-gravity/.tmp/service.log
+StandardOutput=append:/home/ec2-user/Anti-gravity/.tmp/service.log
+StandardError=append:/home/ec2-user/Anti-gravity/.tmp/service.log
 Environment=PYTHONUNBUFFERED=1
+Environment=DISPLAY=
 
 [Install]
 WantedBy=multi-user.target
