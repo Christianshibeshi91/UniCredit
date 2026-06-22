@@ -4,21 +4,26 @@ LinkedIn blocks Firecrawl, so this module uses LinkedIn's public
 guest job API (no auth required) for search results and individual
 job detail pages.  Parsed with regex — no Playwright needed.
 
+Focus Areas:
+  - Power Platform (Power Apps, Power Automate, Power BI, Dataverse)
+  - Microsoft Copilot Studio / M365 Copilot development
+  - AI Automation / Low-Code AI solutions
+
 Filters:
-  - Title/description MUST contain "Power Platform" or "Power Apps"
+  - Title/description MUST contain Power Platform, Copilot, or AI Automation keywords
   - REJECT: Architect, F&O, Functional, Operations, Finance, D365 F&O
   - Only remote positions
-  - Only jobs posted in last 24 hours (not reposted)
+  - Only jobs posted within freshness window (default: last 60 min)
 """
 
 import html as html_mod
-import itertools
 import json
 import os
 import re
 import time
 import random
 import urllib.parse
+from concurrent.futures import ThreadPoolExecutor
 
 import requests  # pyre-ignore[21]
 
@@ -26,22 +31,61 @@ from LinkedinAutomation.alert_user import alert  # pyre-ignore[21]
 from LinkedinAutomation.anti_detect import get_random_ua, get_human_delay  # pyre-ignore[21]
 
 BASE_DIR = os.path.dirname(os.path.dirname(__file__))
+PROXY = os.getenv("SCRAPER_PROXY", "")
 
-# --- Search terms (only Power Platform / Power Apps focused) ---
+# --- Search terms: Power Platform + Copilot + AI Automation ---
 SEARCH_TERMS = [
+    # Power Platform core
     "Power Platform Developer",
     "Power Platform Consultant",
     "Power Apps Developer",
     "Power Platform Engineer",
     "Power Platform Lead",
+    "Power Automate Developer",
+    "Power BI Developer",
+    "Dataverse Developer",
+    "Microsoft Power Platform",
+    "Low Code Developer",
+    # Copilot focused
+    "Copilot Developer",
+    "Copilot Studio Developer",
+    "Microsoft Copilot Developer",
+    "M365 Copilot Developer",
+    "Copilot Studio Engineer",
+    "Microsoft 365 Copilot",
+    # AI Automation
+    "AI Automation Developer",
+    "AI Power Platform",
+]
+
+# Tiered time windows — search freshest first to enable early applications
+# (f_TPR value in seconds, freshness_priority 1=freshest, max terms to search, label)
+FRESHNESS_TIERS = [
+    ("r3600",   1, 18, "1 hour"),    # All 18 terms in the freshest window
+    ("r7200",   2, 12, "2 hours"),
+    ("r21600",  3,  8, "6 hours"),
+    ("r43200",  4,  5, "12 hours"),
+    ("r86400",  5,  5, "24 hours"),
 ]
 
 # --- Filters ---
 # Title or description MUST contain at least one of these (case-insensitive)
+# Jobs passing ANY one of these are kept — covers both Power Platform and Copilot roles
 MUST_HAVE_KEYWORDS = [
+    # Power Platform
     "power platform",
     "power apps",
     "powerapps",
+    "power automate",
+    "dataverse",
+    # Copilot
+    "copilot studio",
+    "microsoft copilot",
+    "m365 copilot",
+    "copilot developer",
+    # AI Automation
+    "ai automation",
+    "ai power platform",
 ]
 
 # REJECT if title contains any of these (case-insensitive)
@@ -96,7 +140,7 @@ def _passes_full_filter(job):
     if has_rejected:
         return False
 
-    # Reject reposted jobs (LinkedIn marks them)
+    # Reject reposted jobs
     if "reposted" in title or "reposted" in desc:
         return False
 
@@ -108,12 +152,12 @@ def _is_reposted(card_html):
     return "reposted" in card_html.lower()
 
 
-def _build_search_url(query, start=0):
+def _build_search_url(query, start=0, time_filter="r86400"):
     params = {
         "keywords": query,
         "location": "United States",
         "f_WT": "2",           # Remote only
-        "f_TPR": "r86400",     # Past 24 hours
+        "f_TPR": time_filter,  # Time window (seconds)
         "sortBy": "DD",        # Most recent first
         "start": str(start),
     }
@@ -162,7 +206,6 @@ def _parse_search_html(html_text):
         if not job:
             continue
 
-        # Skip reposted jobs right away
         if _is_reposted(card_html):
             job["_reposted"] = True
             continue
@@ -200,9 +243,10 @@ def _parse_search_html(html_text):
 
 def _scrape_job_details(job):
     """Scrape a public job detail page for description, salary, etc."""
+    proxies = {"http": PROXY, "https": PROXY} if PROXY else None
     try:
         r = requests.get(
-            job["job_url"], headers={"User-Agent": _ua()}, timeout=15
+            job["job_url"], headers={"User-Agent": _ua()}, proxies=proxies, timeout=15
         )
         if r.status_code != 200:
             return job
@@ -232,7 +276,22 @@ def _scrape_job_details(job):
             desc_clean = re.sub(r'\s+', ' ', desc_clean)
             job["description"] = desc_clean[:5000]  # pyre-ignore[29]
 
-        if "Easy Apply" in text or "easy-apply" in text.lower():
+        # Detect Easy Apply — guest HTML is unreliable for any single indicator,
+        # so check multiple signals: text, class names, JSON-LD, hrefs, data attrs.
+        text_lower = text.lower()
+        easy_apply_detected = (
+            "Easy Apply" in text
+            or "easy-apply" in text_lower
+            or "linkedin.com/easy-apply" in text_lower
+            or re.search(r'data-[a-z-]*easy[_-]?apply', text_lower) is not None
+        )
+        if not easy_apply_detected:
+            # Check embedded JSON for applyMethod / easyApply markers
+            if ('"applyMethod"' in text or '"applyUrl"' in text):
+                if ("easyApply" in text or "EASY_APPLY" in text
+                        or "easy_apply" in text_lower):
+                    easy_apply_detected = True
+        if easy_apply_detected:
             job["is_easy_apply"] = True
 
         salary_m = re.search(
@@ -252,73 +311,110 @@ def _scrape_job_details(job):
     return job
 
 
-def search(max_jobs=15):
-    """Search LinkedIn for Power Platform / Power Apps jobs (filtered)."""
-    all_jobs = []
-    jobs_per_term = max(3, max_jobs // len(SEARCH_TERMS))
+def search(max_jobs=30):
+    """Search LinkedIn with tiered time windows — freshest jobs first.
 
-    alert("LinkedIn Search", f"Searching {len(SEARCH_TERMS)} terms, max {max_jobs} jobs")
+    FRESHNESS_MODE (from .env):
+      "1hour"  — Only tier 1 (jobs posted in last 60 min). Default for hourly runs.
+      "full"   — All 5 tiers (1h, 2h, 6h, 12h, 24h). Use for manual deep searches.
+    """
+    freshness_mode = os.getenv("FRESHNESS_MODE", "1hour").lower()
+
+    if freshness_mode == "1hour":
+        active_tiers = [t for t in FRESHNESS_TIERS if t[0] == "r3600"]
+        alert("LinkedIn Search", "HOURLY MODE: Only searching jobs posted in last 60 minutes")
+    else:
+        active_tiers = FRESHNESS_TIERS
+        alert("LinkedIn Search", f"FULL MODE: All {len(FRESHNESS_TIERS)} time windows")
+
+    all_jobs = []
+    seen_urls = set()
+
+    alert("LinkedIn Search", f"Tiered search: {len(active_tiers)} windows, {len(SEARCH_TERMS)} terms, max {max_jobs} jobs")
     alert("Filters", "MUST: Power Platform/Power Apps | REJECT: Architect, F&O, Functional, Operations, Reposted")
 
-    # Shuffle search terms each run to vary pattern
+    # Shuffle terms once — all tiers use the same shuffled order
     terms = list(SEARCH_TERMS)
     random.shuffle(terms)
 
-    for term in terms:
+    for time_filter, priority, max_terms, label in active_tiers:
         if len(all_jobs) >= max_jobs * 2:
             break
 
-        url = _build_search_url(term)
-        alert("Searching", f"'{term}'...")
+        tier_terms = terms[:max_terms]
+        tier_count = 0
+        alert("Tier", f"--- Tier {priority} ({label}) — {len(tier_terms)} terms ---")
 
-        try:
-            r = requests.get(url, headers={"User-Agent": _ua()}, timeout=15)
-            if r.status_code != 200:
-                alert("Search Error", f"HTTP {r.status_code} for '{term}'", "error")
-                continue
+        for term in tier_terms:
+            if len(all_jobs) >= max_jobs * 2:
+                break
 
-            jobs = list(itertools.islice(_parse_search_html(r.text), jobs_per_term))
-            all_jobs.extend(jobs)
-            alert("Found", f"{len(jobs)} jobs for '{term}' (after title filter)")
-        except Exception as e:
-            alert("Search Error", f"Failed for '{term}': {e}", "error")
+            url = _build_search_url(term, start=0, time_filter=time_filter)
 
-        time.sleep(get_human_delay("between_fields"))
+            try:
+                r = requests.get(url, headers={"User-Agent": _ua()}, timeout=15)
+                if r.status_code != 200:
+                    alert("Search Error", f"HTTP {r.status_code} for '{term}' (tier {priority})", "error")
+                    continue
 
-    # Deduplicate by URL
-    seen_urls = set()
-    unique_jobs = []
-    for job in all_jobs:
-        if job["job_url"] not in seen_urls:
-            seen_urls.add(job["job_url"])
-            unique_jobs.append(job)
+                jobs = list(_parse_search_html(r.text))
+                added = 0
+                for job in jobs:
+                    if job["job_url"] not in seen_urls:
+                        seen_urls.add(job["job_url"])
+                        job["freshness_priority"] = priority
+                        all_jobs.append(job)
+                        added += 1
 
-    # Scrape details and apply full filter (title + description)
+                tier_count += added
+                if added:
+                    alert("Found", f"{added} new jobs for '{term}' (tier {priority}: {label})")
+            except Exception as e:
+                alert("Search Error", f"Failed for '{term}' (tier {priority}): {e}", "error")
+
+            time.sleep(get_human_delay("between_fields"))
+
+        alert("Tier Result", f"Tier {priority} ({label}): {tier_count} new jobs")
+
+
+    # Sort by freshness priority — freshest first
+    all_jobs.sort(key=lambda j: j.get("freshness_priority", 6))
+    unique_jobs = all_jobs
+
+    # Scrape details and apply full filter (title + description) in parallel
     detailed_jobs = []
     scraped = 0
-    for job in unique_jobs:
-        if len(detailed_jobs) >= max_jobs:
-            break
+    jobs_to_scrape = unique_jobs[:max_jobs * 3]
+    alert("LinkedIn Search", f"Scraping {len(jobs_to_scrape)} job details in parallel (max workers: 5)...")
 
-        alert("Details", f"Scraping {job['title'] or job['job_id']}...")
-        job = _scrape_job_details(job)
-        scraped += 1
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        futures = [executor.submit(_scrape_job_details, job) for job in jobs_to_scrape]
 
-        # Skip reposted (detected on detail page)
-        if job.get("_reposted"):
-            alert("Filter", f"SKIP (reposted): {job['title']}", "warning")
-            time.sleep(get_human_delay("scroll"))
-            continue
+        for fut in futures:
+            if len(detailed_jobs) >= max_jobs:
+                fut.cancel()
+                continue
 
-        # Full filter: title + description must have keywords, no banned terms
-        if not _passes_full_filter(job):
-            alert("Filter", f"SKIP (keywords): {job['title']}", "warning")
-            time.sleep(get_human_delay("scroll"))
-            continue
+            try:
+                job = fut.result()
+                scraped += 1
 
-        detailed_jobs.append(job)
-        alert("PASS", f"{job['title']} at {job['company']}")
-        time.sleep(random.uniform(1, 3))
+                # Skip reposted (detected on detail page)
+                if job.get("_reposted"):
+                    alert("Filter", f"SKIP (reposted): {job['title']}", "warning")
+                    continue
+
+                # Full filter: title + description must have keywords, no banned terms
+                if not _passes_full_filter(job):
+                    alert("Filter", f"SKIP (keywords): {job['title']}", "warning")
+                    continue
+
+                detailed_jobs.append(job)
+                alert("PASS", f"{job['title']} at {job['company']}")
+                time.sleep(random.uniform(0.2, 0.8))  # small staggered delay for logging / flow
+
+            except Exception as e:
+                alert("Detail Scraping", f"Error scraping job details: {e}", "warning")
 
     # Persist to disk
     out_path = os.path.join(BASE_DIR, ".tmp", "new_jobs.json")

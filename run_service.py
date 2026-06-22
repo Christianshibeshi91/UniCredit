@@ -121,10 +121,9 @@ def scheduler_loop():
 
     schedule.every(CYCLE_MINUTES).minutes.do(run_cycle)
 
-    # Send activity report every 12 hours (8 AM and 8 PM PT)
-    schedule.every().day.at("08:00").do(_send_report)
+    # Send daily report once at 8 PM PT
     schedule.every().day.at("20:00").do(_send_report)
-    log.info(f"Next cycle in {CYCLE_MINUTES} minutes, reports at 8AM & 8PM PT")
+    log.info(f"Next cycle in {CYCLE_MINUTES} minutes, daily report at 8PM PT")
 
     while not _shutdown.is_set():
         schedule.run_pending()
@@ -134,18 +133,28 @@ def scheduler_loop():
 
 
 def bot_loop():
-    """Run the Telegram bot (blocking)."""
+    """Run the Telegram bot (blocking) with automatic supervisor restarts."""
     bot_token = os.getenv("TELEGRAM_BOT_TOKEN", "")
     if not bot_token:
         log.warning("TELEGRAM_BOT_TOKEN not set — bot disabled")
         return
 
-    log.info("Starting Telegram bot thread...")
-    try:
-        from LinkedinAutomation.telegram_bot import run_bot  # pyre-ignore[21]
-        run_bot()
-    except Exception as e:
-        log.error(f"Telegram bot crashed: {e}", exc_info=True)
+    retry_delay = 10
+    while not _shutdown.is_set():
+        log.info("Starting Telegram bot thread...")
+        try:
+            from LinkedinAutomation.telegram_bot import run_bot  # pyre-ignore[21]
+            run_bot()
+            log.info("Telegram bot run_bot completed normally")
+            break
+        except Exception as e:
+            log.error(f"Telegram bot crashed: {e}", exc_info=True)
+            if not _shutdown.is_set():
+                log.info(f"Restarting Telegram bot in {retry_delay} seconds...")
+                _shutdown.wait(timeout=retry_delay)
+                retry_delay = min(retry_delay * 2, 120)
+            else:
+                break
 
 
 def _handle_signal(signum, frame):
