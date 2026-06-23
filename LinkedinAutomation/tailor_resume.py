@@ -1,4 +1,5 @@
 """ATS-optimized resume tailoring — OpenRouter (Claude Sonnet) with template fallback."""
+from __future__ import annotations
 
 import json
 import os

@@ -4,11 +4,13 @@ Runs as a long-lived process alongside the daily cron job. When run_daily.py
 discovers a qualifying job, it saves it to pending_approval.json. This bot
 sends approval cards and handles callback responses.
 """
+from __future__ import annotations
 
 import asyncio
 import html as html_lib
 import json
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -54,6 +56,17 @@ VIEWER_CHAT_IDS = [
     for cid in os.getenv("TELEGRAM_VIEWER_CHAT_IDS", "").split(",")
     if cid.strip()
 ]
+
+
+def get_all_chat_ids() -> list:
+    """Return deduplicated list of all configured chat IDs (admin + viewer + legacy)."""
+    legacy = [
+        cid.strip()
+        for cid in os.getenv("TELEGRAM_CHAT_IDS", "").split(",")
+        if cid.strip()
+    ]
+    return list(set(ADMIN_CHAT_IDS + VIEWER_CHAT_IDS + legacy))
+
 
 # ── Interactive Q&A state (for asking admin about unknown form fields) ──
 # When the apply flow hits an unknown field, it sets _pending_question
@@ -661,6 +674,280 @@ async def claude_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     asyncio.create_task(_monitor_claude())
 
 
+# ── Batched Q&A: send ALL unknown fields in one message ───────────
+
+def parse_numbered_replies(text: str, expected_count: int = 1) -> list[str]:
+    """Parse numbered reply formats into a list of answers.
+
+    Supports formats: "1. Yes", "1: Yes", "1) Yes", "1- Yes".
+    Falls back to treating the entire text as a single answer when
+    expected_count is 1 and no numbered pattern is found.
+    """
+    # Match lines starting with a number followed by . : ) or -
+    pattern = r"^\s*\d+\s*[.:\)\-]\s*(.+)"
+    matches = re.findall(pattern, text, re.MULTILINE)
+
+    if matches:
+        return [m.strip() for m in matches]
+
+    # Fallback: single answer when only one question was asked
+    if expected_count == 1 and text.strip():
+        return [text.strip()]
+
+    return []
+
+
+async def send_batch_questions(
+    job_title: str,
+    job_url: str,
+    fields: list[dict],
+    screenshot_path: str = "",
+) -> None:
+    """Send a single Telegram message with all unknown fields as numbered questions.
+
+    Each field dict should contain:
+        - label (str): the form field label
+        - type (str): "select", "radio", "checkbox", "text", etc.
+        - options (list[str], optional): available choices for select/radio
+    """
+    if not _bot_application or not ADMIN_CHAT_IDS:
+        return
+
+    bot = _bot_application.bot  # pyre-ignore[16]
+
+    lines = [
+        "\U0001f514 <b>Application needs your input</b>",
+        f"\U0001f4cb {_esc(job_title)}",
+        f"\U0001f517 {_esc(job_url)}",
+        "",
+    ]
+
+    for i, field in enumerate(fields, 1):
+        label = _esc(field.get("label", f"Field {i}"))
+        field_type = field.get("type", "text").lower()
+        options = field.get("options", [])
+
+        if field_type in ("select", "radio") and options:
+            display_opts = options[:6]
+            hint = " / ".join(_esc(o) for o in display_opts)
+            if len(options) > 6:
+                hint += " / ..."
+            lines.append(f"{i}. {label} [{hint}]")
+        elif field_type == "checkbox":
+            lines.append(f"{i}. {label} [Yes/No]")
+        else:
+            lines.append(f"{i}. {label} [text]")
+
+    lines.extend([
+        "",
+        "Reply with numbered answers, e.g.:",
+        "1. Yes",
+        "2. 8",
+        "3. Remote",
+        "",
+        "\u23f1 Auto-skip in 60 min if no reply",
+        "Type /skip to skip this application",
+    ])
+
+    message_text = "\n".join(lines)
+
+    for chat_id in ADMIN_CHAT_IDS:
+        try:
+            if screenshot_path and os.path.exists(screenshot_path):
+                with open(screenshot_path, "rb") as photo:
+                    await bot.send_photo(chat_id=chat_id, photo=photo)
+            await bot.send_message(
+                chat_id=chat_id,
+                text=message_text,
+                parse_mode="HTML",
+            )
+        except Exception as e:
+            alert("Telegram Batch Q&A", f"Failed to send questions: {e}", "error")
+
+
+async def wait_for_batch_reply(
+    expected_count: int,
+    timeout: int | None = None,
+) -> list[str] | None:
+    """Wait for admin's numbered reply to batch questions.
+
+    Returns a list of answers or None on timeout / /skip.
+    Sends a follow-up prompt if the reply has fewer answers than expected.
+    """
+    global _pending_question
+
+    if not _bot_application or not ADMIN_CHAT_IDS:
+        return None
+
+    if timeout is None:
+        timeout = int(os.getenv("TELEGRAM_QA_TIMEOUT", "3600"))
+
+    bot = _bot_application.bot  # pyre-ignore[16]
+    event = asyncio.Event()
+    _pending_question = {"event": event, "answer": None}
+
+    try:
+        await asyncio.wait_for(event.wait(), timeout=timeout)
+    except asyncio.TimeoutError:
+        for chat_id in ADMIN_CHAT_IDS:
+            try:
+                await bot.send_message(
+                    chat_id=chat_id,
+                    text="\u23f0 Timed out waiting for batch answers. Skipping application.",
+                )
+            except Exception:
+                pass
+        _pending_question = None
+        return None
+
+    raw_answer = _pending_question.get("answer", "") if _pending_question else ""
+    _pending_question = None
+
+    if not raw_answer or raw_answer.strip().lower() == "/skip":
+        return None
+
+    answers = parse_numbered_replies(raw_answer, expected_count)
+
+    # If partial answers received, ask for remaining
+    if 0 < len(answers) < expected_count:
+        missing_start = len(answers) + 1
+        for chat_id in ADMIN_CHAT_IDS:
+            try:
+                await bot.send_message(
+                    chat_id=chat_id,
+                    text=(
+                        f"Got {len(answers)} of {expected_count} answers. "
+                        f"Please reply with answers for questions "
+                        f"{missing_start}-{expected_count}:"
+                    ),
+                )
+            except Exception:
+                pass
+
+        # Wait again for remaining answers
+        event2 = asyncio.Event()
+        _pending_question = {"event": event2, "answer": None}
+
+        try:
+            await asyncio.wait_for(event2.wait(), timeout=timeout)
+        except asyncio.TimeoutError:
+            _pending_question = None
+            return answers  # Return partial answers rather than nothing
+
+        raw_remaining = _pending_question.get("answer", "") if _pending_question else ""
+        _pending_question = None
+
+        if raw_remaining and raw_remaining.strip().lower() != "/skip":
+            remaining = parse_numbered_replies(raw_remaining, expected_count - len(answers))
+            answers.extend(remaining)
+
+    return answers if answers else None
+
+
+def get_batch_ask_callback():
+    """Factory for batched Q&A callback (used by apply functions).
+
+    Returns an async callable that sends all unknown fields in one message
+    and waits for a single numbered reply, or None if bot is not running.
+    """
+    async def _batch_ask(
+        job_title: str,
+        job_url: str,
+        fields: list[dict],
+        screenshot_path: str = "",
+    ) -> list[str] | None:
+        await send_batch_questions(job_title, job_url, fields, screenshot_path)
+        return await wait_for_batch_reply(len(fields))
+
+    if not _bot_application or not ADMIN_CHAT_IDS or not _bot_loop:
+        return None
+    return _batch_ask
+
+
+def get_scheduler_batch_ask_callback():
+    """Thread-safe batched Q&A callback for the scheduler thread.
+
+    Bridges the scheduler thread to the bot's event loop, same pattern
+    as get_scheduler_ask_callback but for batched field questions.
+    """
+    import threading as _threading
+
+    async def _batch_ask(
+        job_title: str,
+        job_url: str,
+        fields: list[dict],
+        screenshot_path: str = "",
+    ) -> list[str] | None:
+        global _pending_question
+
+        if not _bot_application or not ADMIN_CHAT_IDS or not _bot_loop:
+            return None
+
+        reply_event = _threading.Event()
+        qa_timeout = int(os.getenv("TELEGRAM_QA_TIMEOUT", "3600"))
+
+        async def _send_and_wait():
+            global _pending_question
+
+            await send_batch_questions(job_title, job_url, fields, screenshot_path)
+
+            async_event = asyncio.Event()
+            _pending_question = {
+                "event": async_event,
+                "answer": None,
+                "thread_event": reply_event,
+                "thread_answer": None,
+            }
+
+        future = asyncio.run_coroutine_threadsafe(_send_and_wait(), _bot_loop)
+        try:
+            future.result(timeout=15)
+        except Exception as e:
+            alert("Telegram Batch Q&A", f"Could not send questions: {e}", "error")
+            return None
+
+        loop = asyncio.get_event_loop()
+        replied = await loop.run_in_executor(
+            None, lambda: reply_event.wait(timeout=qa_timeout)
+        )
+
+        if not replied:
+            async def _send_timeout():
+                global _pending_question
+                bot = _bot_application.bot  # pyre-ignore[16]
+                for chat_id in ADMIN_CHAT_IDS:
+                    try:
+                        await bot.send_message(
+                            chat_id=chat_id,
+                            text="\u23f0 Timed out waiting for batch answers. Skipping.",
+                        )
+                    except Exception:
+                        pass
+                _pending_question = None
+
+            asyncio.run_coroutine_threadsafe(_send_timeout(), _bot_loop)
+            return None
+
+        raw_answer = (
+            _pending_question.get("thread_answer", "")
+            if _pending_question else ""
+        )
+
+        async def _cleanup():
+            global _pending_question
+            _pending_question = None
+        asyncio.run_coroutine_threadsafe(_cleanup(), _bot_loop)
+
+        if not raw_answer or raw_answer.strip().lower() == "/skip":
+            return None
+
+        return parse_numbered_replies(raw_answer, len(fields)) or None
+
+    if not _bot_application or not ADMIN_CHAT_IDS or not _bot_loop:
+        return None
+    return _batch_ask
+
+
 # ── Interactive Q&A: ask admin for unknown form fields ─────────────
 
 def _create_ask_admin_callback():
@@ -837,9 +1124,14 @@ async def text_reply_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         thread_event.set()
 
     if answer.lower() == "/skip":
-        await update.message.reply_text("Skipping this field.")
+        await update.message.reply_text("Skipping this field/application.")
     else:
-        await update.message.reply_text(f"Got it: {answer}")
+        # Show parsed count for numbered replies so admin knows it was understood
+        parsed = parse_numbered_replies(answer)
+        if len(parsed) > 1:
+            await update.message.reply_text(f"Got {len(parsed)} answers. Processing...")
+        else:
+            await update.message.reply_text(f"Got it: {_esc(answer)}")
 
 
 async def _handle_approve(query, job_id: str, job_data: dict) -> None:
@@ -1136,7 +1428,7 @@ def _build_viewer_message(job_data: dict) -> str:
 
 def send_approval_card(job_data: dict) -> bool:
     """Send approval card to admins (with buttons) and plain notification to viewers."""
-    if not BOT_TOKEN or (not ADMIN_CHAT_IDS and not VIEWER_CHAT_IDS):
+    if not BOT_TOKEN or not get_all_chat_ids():
         alert("Telegram Bot", "BOT_TOKEN or CHAT_IDS not configured", "warning")
         return False
 
@@ -1193,9 +1485,56 @@ def send_approval_card(job_data: dict) -> bool:
     return success
 
 
+def send_early_alert(job_data: dict) -> bool:
+    """Send a lightweight 'New Match Found' alert immediately after scoring.
+
+    Only fires when score >= 50. Sends to all configured chat IDs.
+    """
+    job_score = job_data.get("score", 0)
+    if job_score < 50:
+        return False
+
+    all_ids = get_all_chat_ids()
+    if not BOT_TOKEN or not all_ids:
+        alert("Telegram Bot", "BOT_TOKEN or CHAT_IDS not configured", "warning")
+        return False
+
+    import requests  # pyre-ignore[21]
+
+    title = _esc(job_data.get("title", "Unknown"))
+    company = _esc(job_data.get("company", "Unknown"))
+    grade = _esc(job_data.get("grade", "N/A"))
+    url = _esc(job_data.get("job_url", ""))
+
+    message = (
+        "\U0001f514 <b>New Match Found!</b>\n"
+        f"{title} at {company}\n"
+        f"Score: {job_score}/100 ({grade})\n"
+        f'<a href="{url}">View Job</a>'
+    )
+
+    api_url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+    success = True
+
+    for chat_id in all_ids:
+        try:
+            resp = requests.post(api_url, json={
+                "chat_id": chat_id,
+                "text": message,
+                "parse_mode": "HTML",
+                "disable_web_page_preview": True,
+            }, timeout=10)
+            resp.raise_for_status()
+        except Exception as e:
+            alert("Telegram Error", f"Failed to send early alert to {chat_id}: {e}", "error")
+            success = False
+
+    return success
+
+
 def send_job_notification(job_data: dict) -> bool:
     """Send a notification-only card (no buttons) to all chat IDs after auto-apply."""
-    if not BOT_TOKEN or (not ADMIN_CHAT_IDS and not VIEWER_CHAT_IDS):
+    if not BOT_TOKEN or not get_all_chat_ids():
         alert("Telegram Bot", "BOT_TOKEN or CHAT_IDS not configured", "warning")
         return False
 
@@ -1243,7 +1582,7 @@ def send_job_notification(job_data: dict) -> bool:
 
     api_url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
     success = True
-    all_ids = list(set(ADMIN_CHAT_IDS + VIEWER_CHAT_IDS))
+    all_ids = get_all_chat_ids()
 
     for chat_id in all_ids:
         try:

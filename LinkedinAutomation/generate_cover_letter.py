@@ -1,4 +1,4 @@
-"""Cover letter generation — Ollama/Qwen with template fallback."""
+"""Cover letter generation — OpenRouter (Claude Sonnet) with template fallback."""
 
 import json
 import os
@@ -6,7 +6,7 @@ import re
 from dotenv import load_dotenv  # pyre-ignore[21]
 
 from LinkedinAutomation.alert_user import alert  # pyre-ignore[21]
-from LinkedinAutomation.ollama_client import generate as ollama_generate, is_available as ollama_available, OLLAMA_WRITING_MODEL  # pyre-ignore[21]
+from LinkedinAutomation.openrouter_client import generate as ollama_generate, is_available as ollama_available, OLLAMA_WRITING_MODEL  # pyre-ignore[21]
 from LinkedinAutomation import safe_job_id, load_profile as _safe_load_profile  # pyre-ignore[21]
 
 BASE_DIR = os.path.dirname(os.path.dirname(__file__))
@@ -157,15 +157,15 @@ Sincerely,
 
 
 def generate(job, score_data, profile=None):
-    """Generate cover letter. Uses Ollama/Qwen, falls back to template."""
+    """Generate cover letter. Uses OpenRouter (Claude Sonnet), falls back to template."""
     if profile is None:
         profile = _load_profile()
 
     cl_text = None
 
-    # Try Ollama (local LLM)
+    # Try OpenRouter (Claude Sonnet for writing)
     if ollama_available():
-        alert("Cover Letter", f"Using Ollama ({OLLAMA_WRITING_MODEL}) for cover letter")
+        alert("Cover Letter", f"Using OpenRouter ({OLLAMA_WRITING_MODEL}) for cover letter")
         prompt = _build_cl_prompt(job, score_data, profile)
         result = ollama_generate(prompt, model=OLLAMA_WRITING_MODEL, max_tokens=1200)
         if result and len(result.strip()) > 200:

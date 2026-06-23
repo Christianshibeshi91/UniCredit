@@ -3,6 +3,7 @@
 - Screenshots under .tmp/screenshots are deleted when older than SCREENSHOT_RETENTION_DAYS (default 7).
 - Called at the start of run_daily and run_scheduler so each run prunes old files.
 """
+from __future__ import annotations
 
 import os
 import time

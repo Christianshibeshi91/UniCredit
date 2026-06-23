@@ -1,4 +1,5 @@
 """Extract salary, remote status, and required skills from job descriptions using heuristics."""
+from __future__ import annotations
 
 import re
 

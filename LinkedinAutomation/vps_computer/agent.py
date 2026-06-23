@@ -2,6 +2,7 @@
 
 Uses Ollama with Qwen for local LLM inference.
 """
+from __future__ import annotations
 
 import asyncio
 import json

@@ -1,8 +1,9 @@
-"""Job scoring — Claude API with free local fallback.
+"""Job scoring — OpenRouter API with free local fallback.
 
-Uses Claude when API credits are available. Falls back to keyword-based
-scoring (no API needed) when credits run out.
+Uses OpenRouter (Gemini Flash for fast JSON scoring) when API key is available.
+Falls back to keyword-based scoring (no API needed) when unavailable.
 """
+from __future__ import annotations
 
 import itertools
 import json
@@ -11,7 +12,7 @@ import re
 from dotenv import load_dotenv  # pyre-ignore[21]
 
 from LinkedinAutomation.alert_user import alert  # pyre-ignore[21]
-from LinkedinAutomation.ollama_client import generate_json as ollama_json, is_available as ollama_available  # pyre-ignore[21]
+from LinkedinAutomation.openrouter_client import generate_json as ollama_json, is_available as ollama_available  # pyre-ignore[21]
 from LinkedinAutomation import safe_job_id, load_profile as _safe_load_profile  # pyre-ignore[21]
 
 BASE_DIR = os.path.dirname(os.path.dirname(__file__))
@@ -177,14 +178,14 @@ def _local_score(job, profile):
 
 
 def score(job, profile=None):
-    """Score a job against the candidate profile. Tries Ollama first, falls back to local."""
+    """Score a job against the candidate profile. Tries OpenRouter first, falls back to local."""
     if profile is None:
         profile = _load_profile()
 
 
-    # Try Ollama (free local LLM)
+    # Try OpenRouter (Gemini Flash for scoring)
     if ollama_available():
-        alert("Score", "Using Ollama (free local LLM) for scoring")
+        alert("Score", "Using OpenRouter (Gemini Flash) for scoring")
         prompt = _build_scoring_prompt(job, profile)
         result = ollama_json(prompt)
         if result and "score" in result:
@@ -194,7 +195,7 @@ def score(job, profile=None):
             with open(out_path, "w") as f:
                 json.dump(result, f, indent=2)
             return result
-        alert("Score", "Ollama response invalid, falling back to local", "warning")
+        alert("Score", "OpenRouter response invalid, falling back to local", "warning")
 
     # Free local keyword fallback
     alert("Score", "Using free local keyword-based scoring")

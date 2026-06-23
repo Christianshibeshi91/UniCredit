@@ -4,6 +4,7 @@
 - Resume path validation: resolve path and ensure it is under allowed dirs (path traversal).
 - Restrictive file permissions for PII/sensitive files (owner read/write only).
 """
+from __future__ import annotations
 
 import os
 import re

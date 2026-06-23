@@ -1,7 +1,7 @@
 """Interview prep automation — generates STAR answers, company research, and prep materials.
 
 Triggered when a job's Application Status is changed to "Interview" in Google Sheets.
-Uses Ollama/Qwen to generate tailored interview prep and sends via Telegram.
+Uses OpenRouter (Claude Sonnet) to generate tailored interview prep and sends via Telegram.
 """
 
 import json
@@ -11,7 +11,8 @@ import requests  # pyre-ignore[21]
 from dotenv import load_dotenv  # pyre-ignore[21]
 
 from LinkedinAutomation.alert_user import alert  # pyre-ignore[21]
-from LinkedinAutomation.ollama_client import generate as ollama_generate, is_available as ollama_available, OLLAMA_WRITING_MODEL  # pyre-ignore[21]
+from LinkedinAutomation.telegram_bot import get_all_chat_ids  # pyre-ignore[21]
+from LinkedinAutomation.openrouter_client import generate as ollama_generate, is_available as ollama_available, OLLAMA_WRITING_MODEL  # pyre-ignore[21]
 from LinkedinAutomation.log_to_sheets import get_rows_by_status  # pyre-ignore[21]
 
 BASE_DIR = os.path.dirname(os.path.dirname(__file__))
@@ -92,18 +93,18 @@ Format the output in clean, readable text with clear section headers."""
 
 
 def generate_prep(job_row: dict) -> str:
-    """Generate interview prep materials using Ollama/Qwen."""
+    """Generate interview prep materials using OpenRouter (Claude Sonnet)."""
     profile = _load_profile()
     prompt = _build_prep_prompt(job_row, profile)
 
     if not ollama_available():
-        return "ERROR: Ollama is not running. Start it with: ollama serve"
+        return "ERROR: OpenRouter API key not configured. Set OPENROUTER_API_KEY in .env"
 
     try:
         result = ollama_generate(prompt, model=OLLAMA_WRITING_MODEL, max_tokens=4000)
         if result and len(result.strip()) > 100:
             return result
-        return "ERROR: Ollama returned empty response"
+        return "ERROR: OpenRouter returned empty response"
     except Exception as e:
         return f"ERROR generating prep: {e}"
 
@@ -111,12 +112,10 @@ def generate_prep(job_row: dict) -> str:
 def _send_prep_telegram(title: str, company: str, prep_text: str) -> bool:
     """Send interview prep to Telegram (split into chunks if needed)."""
     bot_token = os.getenv("TELEGRAM_BOT_TOKEN", "")
-    chat_ids_raw = os.getenv("TELEGRAM_CHAT_IDS", "")
+    chat_ids = get_all_chat_ids()
 
-    if not bot_token or not chat_ids_raw:
+    if not bot_token or not chat_ids:
         return False
-
-    chat_ids = [cid.strip() for cid in chat_ids_raw.split(",") if cid.strip()]
     api_url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
 
     # Telegram max message length is 4096 chars

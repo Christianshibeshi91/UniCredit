@@ -1,4 +1,5 @@
 """Append a job row to the Google Sheet (idempotent — skips if job_url exists)."""
+from __future__ import annotations
 
 import os
 from datetime import datetime, timezone

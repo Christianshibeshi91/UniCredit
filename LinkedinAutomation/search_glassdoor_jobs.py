@@ -3,6 +3,7 @@
 Routes Glassdoor searches through the Firecrawl API to bypass bot detection.
 Requires FIRECRAWL_API_KEY in .env.
 """
+from __future__ import annotations
 
 import os
 import re

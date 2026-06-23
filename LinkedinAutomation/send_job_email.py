@@ -3,6 +3,7 @@
 import os
 import requests  # pyre-ignore[21]
 from LinkedinAutomation.alert_user import alert  # pyre-ignore[21]
+from LinkedinAutomation.telegram_bot import get_all_chat_ids  # pyre-ignore[21]
 
 
 def _build_message(job, score_result):
@@ -48,13 +49,11 @@ def send_job_notification(job, score_result):
         TELEGRAM_CHAT_IDS   – comma-separated chat IDs to notify
     """
     bot_token = os.getenv("TELEGRAM_BOT_TOKEN", "")
-    chat_ids_raw = os.getenv("TELEGRAM_CHAT_IDS", "")
+    chat_ids = get_all_chat_ids()
 
-    if not bot_token or not chat_ids_raw:
-        alert("Telegram", "TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_IDS not set — skipping.", "warning")
+    if not bot_token or not chat_ids:
+        alert("Telegram", "TELEGRAM_BOT_TOKEN / CHAT_IDS not set — skipping.", "warning")
         return False
-
-    chat_ids = [cid.strip() for cid in chat_ids_raw.split(",") if cid.strip()]
     title = job.get("title", "Unknown")
     message = _build_message(job, score_result)
     api_url = f"https://api.telegram.org/bot{bot_token}/sendMessage"

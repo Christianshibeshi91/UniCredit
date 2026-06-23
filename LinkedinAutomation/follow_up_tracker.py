@@ -4,6 +4,7 @@ Scans Google Sheets for rows with Application Status = "Applied" or
 "Approved - Manual Apply" where Date Logged is older than FOLLOW_UP_DAYS.
 Sends a Telegram reminder and updates Follow-Up Status column.
 """
+from __future__ import annotations
 
 import json
 import os
@@ -35,6 +36,7 @@ def _parse_date_logged(date_str: str) -> datetime | None:
 
 from LinkedinAutomation.alert_user import alert  # pyre-ignore[21]
 from LinkedinAutomation.setup_google_sheet import get_sheets_service  # pyre-ignore[21]
+from LinkedinAutomation.telegram_bot import get_all_chat_ids  # pyre-ignore[21]
 
 BASE_DIR = os.path.dirname(os.path.dirname(__file__))
 load_dotenv(os.path.join(BASE_DIR, ".env"))
@@ -146,13 +148,11 @@ def _update_follow_up_status(service, spreadsheet_id: str, row_num: int) -> None
 def check_follow_ups() -> int:
     """Check for and send follow-up reminders. Returns count of reminders sent."""
     bot_token = os.getenv("TELEGRAM_BOT_TOKEN", "")
-    chat_ids_raw = os.getenv("TELEGRAM_CHAT_IDS", "")
+    chat_ids = get_all_chat_ids()
 
-    if not bot_token or not chat_ids_raw:
+    if not bot_token or not chat_ids:
         alert("Follow-Up", "Telegram not configured, skipping", "warning")
         return 0
-
-    chat_ids = [cid.strip() for cid in chat_ids_raw.split(",") if cid.strip()]
 
     try:
         service = get_sheets_service()

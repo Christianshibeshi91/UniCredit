@@ -15,6 +15,7 @@ Targets: Indeed, Glassdoor, Dice, RemoteOK, BuiltIn, Google Jobs,
 
 Requires: playwright, beautifulsoup4, lxml, requests
 """
+from __future__ import annotations
 
 import hashlib
 import json
@@ -39,6 +40,11 @@ SEARCH_TERMS = [
     "Power Platform Developer",
     "Power Apps Developer",
     "Power Platform Consultant",
+    "Power Automate Developer",
+    "Power BI Developer",
+    "Dataverse Developer",
+    "Microsoft Power Platform",
+    "Low Code Developer",
 ]
 
 PROXY = os.getenv("SCRAPER_PROXY", "")
@@ -353,7 +359,64 @@ def _job_id(source: str, url: str) -> str:
     return f"{source}-{h}"
 
 
-def _make_job(source, title, company, location, job_url, description, salary=""):
+def _detect_linkedin_easy_apply(job_url: str) -> bool:
+    """Check a LinkedIn job page for Easy Apply indicators via lightweight HTTP."""
+    try:
+        resp = req_lib.get(
+            job_url,
+            headers={"User-Agent": get_random_ua()},
+            timeout=10,
+        )
+        if resp.status_code != 200:
+            return False
+        text = resp.text
+        text_lower = text.lower()
+        # Check multiple indicators — guest HTML is unreliable for any single one
+        if "Easy Apply" in text:
+            return True
+        if "easy-apply" in text_lower:
+            return True
+        if "linkedin.com/easy-apply" in text_lower:
+            return True
+        if '"applyMethod"' in text or '"applyUrl"' in text:
+            # Embedded JSON often contains applyMethod for Easy Apply jobs
+            if "easyApply" in text or "EASY_APPLY" in text or "easy_apply" in text_lower:
+                return True
+        if re.search(r'data-[a-z-]*easy[_-]?apply', text_lower):
+            return True
+        return False
+    except Exception:
+        return False
+
+
+def _estimate_freshness_priority(date_text: str) -> int:
+    """Parse 'posted X ago' style text into freshness priority 1-6."""
+    if not date_text:
+        return 6
+    t = date_text.lower().strip()
+    if any(w in t for w in ("just now", "moment", "second")):
+        return 1
+    hour_match = re.search(r'(\d+)\s*hour', t)
+    if hour_match:
+        h = int(hour_match.group(1))
+        if h <= 1:
+            return 1
+        if h <= 2:
+            return 2
+        if h <= 6:
+            return 3
+        if h <= 12:
+            return 4
+        return 5
+    if any(w in t for w in ("today", "1 day", "a day")):
+        return 5
+    return 6
+
+
+def _make_job(source, title, company, location, job_url, description, salary="", date_text=""):
+    is_easy_apply = False
+    if job_url and "linkedin.com" in job_url:
+        is_easy_apply = _detect_linkedin_easy_apply(job_url)
     return {
         "job_id": _job_id(source, job_url or title + company),
         "title": title[:200],
@@ -362,10 +425,11 @@ def _make_job(source, title, company, location, job_url, description, salary="")
         "job_url": job_url,
         "description": description[:5000],
         "salary": salary or extract_salary(description),
-        "is_easy_apply": False,
-        "date_posted": "",
+        "is_easy_apply": is_easy_apply,
+        "date_posted": date_text,
         "source": source,
         "remote_status": "Remote" if re.search(r'\bremote\b', location, re.I) else "",
+        "freshness_priority": _estimate_freshness_priority(date_text),
     }
 
 
@@ -445,12 +509,14 @@ def _scrape_indeed(context, max_jobs: int = 10) -> list:
                     link_el = card.query_selector("h2.jobTitle a, h2 a, a.jcs-JobTitle")
                     salary_el = card.query_selector("div.salary-snippet-container, div.metadata.salary-snippet-container, span.css-19j1a75")
                     snippet_el = card.query_selector("div.job-snippet, div.css-9446fg, table.jobCardShelfContainer td")
+                    date_el = card.query_selector("span.date, span[data-testid='myJobsStateDate'], span.css-qvloho")
 
                     title_text = title_el.inner_text().strip() if title_el else ""
                     company_text = company_el.inner_text().strip() if company_el else ""
                     loc_text = location_el.inner_text().strip() if location_el else ""
                     sal_text = salary_el.inner_text().strip() if salary_el else ""
                     snippet = snippet_el.inner_text().strip() if snippet_el else ""
+                    date_text = date_el.inner_text().strip() if date_el else ""
 
                     href = link_el.get_attribute("href") if link_el else ""
                     if not href:
@@ -461,7 +527,7 @@ def _scrape_indeed(context, max_jobs: int = 10) -> list:
                     full_desc = _scrape_detail(context, job_url)
                     description = full_desc if len(full_desc) > len(snippet) else snippet
 
-                    job = _make_job("indeed", title_text, company_text, loc_text, job_url, description, sal_text)
+                    job = _make_job("indeed", title_text, company_text, loc_text, job_url, description, sal_text, date_text)
                     if passes_filter(job):
                         jobs.append(job)
                         alert("Scraper", f"MATCH: {title_text} @ {company_text}")
@@ -827,8 +893,9 @@ def _scrape_dice(max_jobs: int = 10) -> list:
                 job_url = f"https://www.dice.com/job-detail/{item.get('id', '')}"
                 description = item.get("summary", "")
                 salary = item.get("compensation", "")
+                date_text = item.get("dateCreated", "") or item.get("postedDate", "")
 
-                job = _make_job("dice", title, company, location, job_url, description, salary)
+                job = _make_job("dice", title, company, location, job_url, description, salary, date_text)
                 if passes_filter(job):
                     jobs.append(job)
 
@@ -1252,14 +1319,14 @@ def _scrape_monster(context, max_jobs: int = 10) -> list:
 # Main entry point
 # ============================================================
 
-def search(max_jobs: int = 15) -> list:
+def search(max_jobs: int = 30) -> list:
     """Run all scrapers and return combined, deduplicated results.
 
     Order: API scrapers first (fast, no browser), then Playwright scrapers.
     Each scraper is fault-isolated — one failing doesn't affect others.
     """
     alert("Scraper", "Starting advanced stealth scrapers (zero API cost)")
-    per_source = max(5, max_jobs // 4)
+    per_source = max(8, max_jobs // 3)
     all_jobs = []
 
     # --- Phase 1: API-based (fast, no browser overhead) ---

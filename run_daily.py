@@ -1,7 +1,10 @@
 """Daily LinkedIn job discovery orchestrator.
 
+Fast pipeline: Discover → Score → Notify → Tailor → PDF → Drive → Sheets.
+No auto-apply — focuses on speed so user can be an early applicant.
+
 Usage:
-    python run_daily.py               # Use MAX_APPLICATIONS_PER_DAY from .env
+    python run_daily.py               # Use MAX_JOBS_PER_RUN from .env
     python run_daily.py --max-jobs 3  # Process up to 3 jobs
 """
 
@@ -9,16 +12,13 @@ import argparse
 from concurrent.futures import ThreadPoolExecutor
 import json
 import os
-import random
 import sys
-import time
 from datetime import date
 from dotenv import load_dotenv  # pyre-ignore[21]
 
 BASE_DIR = os.path.dirname(__file__)
 load_dotenv(os.path.join(BASE_DIR, ".env"))
 
-# Add project root to path for imports
 sys.path.insert(0, BASE_DIR)
 
 from LinkedinAutomation.alert_user import alert  # pyre-ignore[21]
@@ -29,20 +29,17 @@ from LinkedinAutomation.score_job import score  # pyre-ignore[21]
 from LinkedinAutomation.tailor_resume import tailor  # pyre-ignore[21]
 from LinkedinAutomation.generate_cover_letter import generate  # pyre-ignore[21]
 from LinkedinAutomation.find_connections import find  # pyre-ignore[21]
-from LinkedinAutomation.log_to_sheets import log_job, update_job_status  # pyre-ignore[21]
-from LinkedinAutomation.apply_easy_apply import apply as easy_apply  # pyre-ignore[21]
-from LinkedinAutomation.apply_external_form import apply_external  # pyre-ignore[21]
-from LinkedinAutomation.telegram_bot import get_scheduler_ask_callback  # pyre-ignore[21]
+from LinkedinAutomation.log_to_sheets import log_job  # pyre-ignore[21]
 from LinkedinAutomation.mark_job_seen import mark_seen  # pyre-ignore[21]
-from LinkedinAutomation.telegram_bot import send_job_notification  # pyre-ignore[21]
+from LinkedinAutomation.telegram_bot import send_job_notification, send_early_alert  # pyre-ignore[21]
 from LinkedinAutomation.generate_daily_report import send_daily_report  # pyre-ignore[21]
 from LinkedinAutomation.follow_up_tracker import check_follow_ups  # pyre-ignore[21]
 from LinkedinAutomation.interview_prep import check_interview_statuses  # pyre-ignore[21]
-from LinkedinAutomation.anti_detect import get_human_delay  # pyre-ignore[21]
 from LinkedinAutomation.upload_to_drive import upload_file as drive_upload  # pyre-ignore[21]
 from LinkedinAutomation.generate_pdf import generate_resume_pdf, generate_cover_letter_pdf  # pyre-ignore[21]
 from LinkedinAutomation.tmp_cleanup import clean_old_screenshots  # pyre-ignore[21]
 from LinkedinAutomation.apply_security import restrict_file_permissions  # pyre-ignore[21]
+from LinkedinAutomation.ollama_client import is_available as llm_available  # pyre-ignore[21]
 
 RUN_STATE_PATH = os.path.join(BASE_DIR, ".tmp", "run_state.json")
 PROFILE_PATH = os.path.join(BASE_DIR, "candidate", "profile.json")
@@ -87,6 +84,12 @@ def main():
 
     alert("Daily Run", f"Starting job discovery (max {args.max_jobs} jobs)")
 
+    # Preflight: check LLM availability
+    if llm_available():
+        alert("Preflight", "LLM available (OpenRouter or Ollama) - AI scoring/writing enabled")
+    else:
+        alert("Preflight", "No LLM available - using keyword fallbacks", "warning")
+
     # Prune old screenshots (PII / disk)
     n = clean_old_screenshots()
     if n:
@@ -105,13 +108,7 @@ def main():
     profile = _load_profile()
     min_score = int(os.getenv("MIN_SCORE_THRESHOLD", "70"))
 
-    # Get thread-safe ask_callback for Telegram Q&A during form filling
-    try:
-        ask_cb = get_scheduler_ask_callback()
-    except Exception:
-        ask_cb = None
-
-    # Step 1: Search all platforms (LinkedIn + Indeed + Glassdoor)
+    # Step 1: Search all platforms (LinkedIn + custom scraper)
     alert("Step 1", "Searching all platforms for jobs...")
     try:
         raw_jobs = aggregate_jobs(max_jobs=args.max_jobs * 2)
@@ -138,7 +135,7 @@ def main():
         _save_run_state(state)
         return
 
-    # Step 3: Process each job
+    # Step 3: Process each job — fast pipeline, no auto-apply
     processed = 0
     jobs_processed_list = state.get("jobs_processed", [])  # pyre-ignore[29]
     errors_list = state.get("errors", [])  # pyre-ignore[29]
@@ -147,83 +144,90 @@ def main():
         if processed >= args.max_jobs:
             break
 
-        # Random 10% skip to vary application pattern
-        if random.random() < 0.10:
-            alert("Random Skip", f"Skipping job {i+1} to vary pattern")
-            continue
-
         job_id = job.get("job_id", f"job-{i}")
         title = job.get("title", "Unknown")
         company = job.get("company", "Unknown")
+        freshness = job.get("freshness_priority", 6)
 
         # Skip blocked companies
         if any(blocked.lower() in company.lower() for blocked in BLOCKED_COMPANIES):
-            alert("Blocked", f"Skipping {company} (blocked company)")
             mark_seen(job.get("job_url", ""))
             continue
 
-        alert("Processing", f"[{i+1}/{len(new_jobs)}] {title} at {company}")
+        alert("Processing", f"[{i+1}/{len(new_jobs)}] {title} at {company} (freshness: {freshness})")
 
         try:
-            # 3a: Extract intelligence
+            # ── Step A: Extract intelligence ──
             intel = extract(job)
             job["salary"] = job.get("salary") or intel["salary"]
             job["remote_status"] = intel["remote_status"]
             job["required_skills"] = intel["required_skills"]
 
-            # 3b: Score with Claude
-            alert("Scoring", f"Scoring {title}...")
+            # ── Step B: Score ──
             score_result = score(job, profile)
             job_score = score_result.get("score", 0)
             grade = score_result.get("grade", "F")
             alert("Score", f"{title}: {job_score}/100 ({grade})")
+
+            # ── Step C: Early Telegram alert (ASAP — before tailoring) ──
+            try:
+                send_early_alert({
+                    "title": title, "company": company,
+                    "score": job_score, "grade": grade,
+                    "job_url": job.get("job_url", ""),
+                })
+            except Exception:
+                pass
 
             if score_result.get("should_reject", False) or job_score < min_score:
                 alert("Rejected", f"{title} scored {job_score} (below {min_score}). Skipping.")
                 mark_seen(job["job_url"])
                 continue
 
-            # 3c/3d/3f: Run resume, cover letter, and connections IN PARALLEL
-            alert("Parallel", f"Generating resume + cover letter + connections for {title}...")
-            resume_file = os.path.join(BASE_DIR, ".tmp", f"resume_{job_id}.txt")
-            cl_file = os.path.join(BASE_DIR, ".tmp", f"cl_{job_id}.txt")
+            # ── Step D: Tailor resume + cover letter + connections (ALL PARALLEL) ──
+            resume_pdf_path = os.path.join(BASE_DIR, ".tmp", f"resume_{job_id}.pdf")
+            cl_pdf_path = os.path.join(BASE_DIR, ".tmp", f"cl_{job_id}.pdf")
+            safe_name = f"{company}_{title}".replace(" ", "_")[:60]
 
             with ThreadPoolExecutor(max_workers=3) as pool:
                 fut_resume = pool.submit(tailor, job, score_result, profile)
                 fut_cl = pool.submit(generate, job, score_result, profile)
-                fut_conn = pool.submit(find, company, title)  # pyre-ignore[29]
+                fut_conn = pool.submit(find, company, title)
+
                 resume_text = fut_resume.result()
                 cl_text = fut_cl.result()
                 try:
                     conn = fut_conn.result()
                 except Exception:
-                    conn = {"connection_name": "Manual Lookup Required", "manual_search_url": ""}
+                    conn = {"connection_name": "", "connection_title": ""}
 
-            # 3e: Generate PDFs and upload to Drive IN PARALLEL
-            alert("PDF+Upload", "Generating PDFs and uploading to Drive...")
-            resume_pdf_path = os.path.join(BASE_DIR, ".tmp", f"resume_{job_id}.pdf")
-            cl_pdf_path = os.path.join(BASE_DIR, ".tmp", f"cl_{job_id}.pdf")
-            safe_name = f"{company}_{title}".replace(" ", "_")
-
-            with ThreadPoolExecutor(max_workers=2) as pool:
-                fut_rpdf = pool.submit(generate_resume_pdf, resume_text, resume_pdf_path)  # pyre-ignore[29]
-                fut_cpdf = pool.submit(generate_cover_letter_pdf, cl_text, cl_pdf_path, title, company)  # pyre-ignore[29]
-                try:
-                    fut_rpdf.result()
-                    resume_pdf = resume_pdf_path
-                except Exception as e:
-                    alert("PDF", f"Resume PDF failed ({e}), using txt", "warning")
-                    resume_pdf = resume_file
-                try:
-                    fut_cpdf.result()
-                    cl_pdf = cl_pdf_path
-                except Exception as e:
-                    alert("PDF", f"Cover letter PDF failed ({e}), using txt", "warning")
-                    cl_pdf = cl_file
-
+            # ── Step E: PDFs + Drive upload (ALL PARALLEL) ──
             resume_drive_link = ""
             cl_drive_link = ""
-            with ThreadPoolExecutor(max_workers=2) as pool:
+
+            with ThreadPoolExecutor(max_workers=4) as pool:
+                fut_rpdf = pool.submit(generate_resume_pdf, resume_text, resume_pdf_path)
+                fut_cpdf = pool.submit(generate_cover_letter_pdf, cl_text, cl_pdf_path, title, company)
+
+                resume_pdf = resume_pdf_path
+                cl_pdf = cl_pdf_path
+                try:
+                    fut_rpdf.result()
+                except Exception as e:
+                    alert("PDF", f"Resume PDF failed: {e}", "warning")
+                    resume_pdf = os.path.join(BASE_DIR, ".tmp", f"resume_{job_id}.txt")
+                    os.makedirs(os.path.dirname(resume_pdf), exist_ok=True)
+                    with open(resume_pdf, "w") as f:
+                        f.write(resume_text or "")
+                try:
+                    fut_cpdf.result()
+                except Exception as e:
+                    alert("PDF", f"CL PDF failed: {e}", "warning")
+                    cl_pdf = os.path.join(BASE_DIR, ".tmp", f"cl_{job_id}.txt")
+                    with open(cl_pdf, "w") as f:
+                        f.write(cl_text or "")
+
+                # Upload both to Drive in parallel
                 fut_rdrive = pool.submit(drive_upload, resume_pdf, f"Resume_{safe_name}.pdf")
                 fut_cdrive = pool.submit(drive_upload, cl_pdf, f"CoverLetter_{safe_name}.pdf")
                 try:
@@ -233,49 +237,10 @@ def main():
                 try:
                     cl_drive_link = fut_cdrive.result()
                 except Exception as e:
-                    alert("Drive", f"Cover letter upload failed: {e}", "warning")
+                    alert("Drive", f"CL upload failed: {e}", "warning")
 
-            # 3h: Auto-apply for Easy Apply jobs
+            # ── Step F: Log to Sheets + Notify via Telegram (PARALLEL) ──
             app_type = "Easy Apply" if job.get("is_easy_apply") else "External"
-            apply_status = "external"
-            applied_str = "No"
-
-            if job.get("is_easy_apply"):
-                alert("Auto Apply", f"Attempting Easy Apply for {title}...")
-                try:
-                    result = easy_apply(job, resume_pdf, cl_text, ask_callback=ask_cb)
-                    if result:
-                        apply_status = "applied"
-                        applied_str = "Yes"
-                        alert("Applied", f"Successfully applied to {title} at {company}")
-                    else:
-                        apply_status = "failed"
-                        applied_str = "No"
-                        alert("Apply Failed", f"Easy Apply returned False for {title}", "warning")
-                except Exception as e:
-                    apply_status = "failed"
-                    applied_str = "No"
-                    alert("Apply Error", f"Easy Apply failed for {title}: {e}", "warning")
-            else:
-                # External application — auto-fill ATS forms
-                alert("External Apply", f"Attempting external application for {title}...")
-                try:
-                    result = apply_external(job, resume_pdf, ask_callback=ask_cb)
-                    if result:
-                        apply_status = "applied"
-                        applied_str = "Yes"
-                        alert("Applied", f"External application submitted for {title} at {company}")
-                    else:
-                        apply_status = "failed"
-                        applied_str = "No"
-                        alert("External Failed", f"External apply returned False for {title}", "warning")
-                except Exception as e:
-                    apply_status = "failed"
-                    applied_str = "No"
-                    alert("External Error", f"External apply failed for {title}: {e}", "warning")
-
-            # 3i: Build job data for logging and notification
-            status_map = {"applied": "Applied", "failed": "Application Failed", "external": "Ready to Apply"}
             log_data = {
                 "job_id": job_id,
                 "title": title,
@@ -298,40 +263,31 @@ def main():
                 "resume_drive_link": resume_drive_link,
                 "cover_letter_drive_link": cl_drive_link,
                 "application_type": app_type,
-                "application_status": status_map[apply_status],
-                "apply_status": apply_status,
-                "applied": applied_str,
+                "application_status": "Ready to Apply",
+                "apply_status": "external",
+                "applied": "No",
             }
 
-            # Log to Google Sheets
-            alert("Logging", "Writing to Google Sheets...")
-            try:
-                log_job(log_data)
-            except Exception as e:
-                alert("Sheets Error", str(e), "warning")
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                fut_sheets = pool.submit(log_job, log_data)
+                fut_notify = pool.submit(send_job_notification, log_data)
+                try:
+                    fut_sheets.result()
+                except Exception as e:
+                    alert("Sheets Error", str(e), "error")
+                    errors_list.append(f"sheets_error:{job_id}")
+                try:
+                    fut_notify.result()
+                except Exception as e:
+                    alert("Telegram Error", str(e), "warning")
 
-            # 3j: Send Telegram notification (no buttons, just info)
-            alert("Telegram", f"Sending notification for {title}...")
-            try:
-                send_job_notification(log_data)
-            except Exception as e:
-                alert("Telegram Error", f"Could not send notification: {e}", "warning")
-
-            # 3k: Mark as seen
             mark_seen(job["job_url"])
             processed += 1
-            jobs_processed_list.append(job_id)  # pyre-ignore[29]
-
-            # Human-like delay between job applications
-            if processed < args.max_jobs:
-                delay = get_human_delay("between_jobs")
-                alert("Waiting", f"Pausing {delay:.0f}s between applications...")
-                time.sleep(delay)
+            jobs_processed_list.append(job_id)
 
         except Exception as e:
             alert("Job Error", f"Failed to process {title}: {e}", "error")
-            errors_list.append(f"process_failed:{job_id}")  # pyre-ignore[29]
-            mark_seen(job.get("job_url", ""))
+            errors_list.append(f"process_failed:{job_id}")
 
     # Save final state
     state["applications_today"] = state.get("applications_today", 0) + processed  # pyre-ignore[29]

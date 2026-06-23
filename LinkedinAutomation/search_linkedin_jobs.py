@@ -15,6 +15,7 @@ Filters:
   - Only remote positions
   - Only jobs posted within freshness window (default: last 60 min)
 """
+from __future__ import annotations
 
 import html as html_mod
 import json

@@ -3,6 +3,7 @@
 Reads today's data from Google Sheets, computes stats, and sends
 a formatted summary to all authorized Telegram chats.
 """
+from __future__ import annotations
 
 import json
 import os
@@ -33,6 +34,7 @@ def _parse_date_logged(date_str: str) -> datetime | None:
 
 from LinkedinAutomation.alert_user import alert  # pyre-ignore[21]
 from LinkedinAutomation.setup_google_sheet import get_sheets_service  # pyre-ignore[21]
+from LinkedinAutomation.telegram_bot import ADMIN_CHAT_IDS  # pyre-ignore[21]
 
 BASE_DIR = os.path.dirname(os.path.dirname(__file__))
 load_dotenv(os.path.join(BASE_DIR, ".env"))
@@ -230,13 +232,11 @@ def send_daily_report() -> bool:
         return False
 
     bot_token = os.getenv("TELEGRAM_BOT_TOKEN", "")
-    chat_ids_raw = os.getenv("TELEGRAM_CHAT_IDS", "")
+    chat_ids = ADMIN_CHAT_IDS
 
-    if not bot_token or not chat_ids_raw:
+    if not bot_token or not chat_ids:
         alert("Daily Report", "Telegram not configured, skipping report", "warning")
         return False
-
-    chat_ids = [cid.strip() for cid in chat_ids_raw.split(",") if cid.strip()]
 
     try:
         service = get_sheets_service()

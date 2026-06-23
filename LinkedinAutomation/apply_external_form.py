@@ -10,6 +10,7 @@ other ATS platforms by:
 6. Uploading resume where file inputs are found
 7. Navigating multi-page forms and submitting
 """
+from __future__ import annotations
 
 import asyncio
 import json
@@ -42,10 +43,21 @@ from LinkedinAutomation.apply_easy_apply import (  # pyre-ignore[21]
 )
 from LinkedinAutomation.apply_external import extract_url  # pyre-ignore[21]
 from LinkedinAutomation.apply_security import sanitize_url, safe_resume_path_with_fallback  # pyre-ignore[21]
-from LinkedinAutomation.ollama_client import (  # pyre-ignore[21]
+from LinkedinAutomation.openrouter_client import (  # pyre-ignore[21]
     generate_json as ollama_json,
     is_available as ollama_available,
+    MODEL_FORM_FILL,
 )
+from LinkedinAutomation.session_snapshot import SessionSnapshot  # pyre-ignore[21]
+
+# Deferred imports to avoid circular dependency (telegram_bot imports apply modules)
+def _get_batch_ask_callback():
+    from LinkedinAutomation.telegram_bot import get_batch_ask_callback  # pyre-ignore[21]
+    return get_batch_ask_callback()
+
+def _get_scheduler_batch_ask_callback():
+    from LinkedinAutomation.telegram_bot import get_scheduler_batch_ask_callback  # pyre-ignore[21]
+    return get_scheduler_batch_ask_callback()
 
 BASE_DIR = os.path.dirname(os.path.dirname(__file__))
 SCREENSHOTS_DIR = os.path.join(BASE_DIR, ".tmp", "screenshots")
@@ -70,8 +82,13 @@ _LOGIN_TEXTS = [
 
 # Fields to skip (ATS boilerplate)
 _SKIP_FIELD_LABELS = [
-    "captcha", "recaptcha", "i agree", "terms and conditions",
-    "privacy policy", "cookie", "subscribe", "newsletter",
+    "captcha", "recaptcha", "subscribe", "newsletter",
+]
+
+# Agreement/consent checkboxes — auto-check these instead of skipping
+_AGREE_LABELS = [
+    "i agree", "terms", "privacy", "consent", "acknowledge",
+    "accept", "i have read", "agree to",
 ]
 
 
@@ -123,6 +140,22 @@ async def _get_field_label(element, page):
         if name:
             label_text = name.replace("_", " ").replace("-", " ").replace("[", " ").replace("]", "")
 
+    # Strategy 8: Workday data-automation-id
+    if not label_text:
+        try:
+            automation_id = await element.evaluate(
+                "el => el.closest('[data-automation-id]')?.getAttribute('data-automation-id') || ''"
+            )
+            if automation_id:
+                readable = re.sub(r'([a-z])([A-Z])', r'\1 \2', automation_id)
+                readable = readable.replace('_', ' ').replace('-', ' ')
+                for prefix in ['section ', 'input ', 'field ']:
+                    if readable.lower().startswith(prefix):
+                        readable = readable[len(prefix):]
+                label_text = readable.strip()
+        except Exception:
+            pass
+
     return label_text.strip()
 
 
@@ -160,63 +193,92 @@ async def _should_skip_field(element, label_text):
     return False
 
 
-async def _collect_page_fields(page):
+async def _collect_page_fields(page, max_wait=8):
     """Scan all visible form fields on the current page into a manifest.
 
-    Returns list of dicts with label, field_type, options, element, tag, input_type.
+    Waits up to *max_wait* seconds for JS-rendered fields (Workday, etc.)
+    before scanning.  Returns list of dicts with label, field_type, options,
+    element, tag, input_type.
     """
-    selectors = [
-        "input:not([type='hidden']):not([type='submit']):not([type='button'])",
-        "textarea",
-        "select",
-    ]
-    manifest = []
+    # --- Wait for JS-rendered fields (Workday renders after page load) ---
+    start = time.time()
+    elements = []
 
-    for selector in selectors:
-        elements = await page.query_selector_all(selector)
-        for element in elements:
+    while time.time() - start < max_wait:
+        elements = await page.query_selector_all(
+            'input:not([type="hidden"]):not([type="submit"]):not([type="button"]), '
+            'textarea, select'
+        )
+        # Also try Workday-specific selectors
+        workday_els = await page.query_selector_all(
+            '[data-automation-id] input, [data-automation-id] select, '
+            '[data-automation-id] textarea, [data-uxi-element-id] input'
+        )
+        for el in workday_els:
+            if el not in elements:
+                elements.append(el)
+
+        # Filter to only visible elements
+        visible = []
+        for el in elements:
             try:
-                label_text = await _get_field_label(element, page)
-                if await _should_skip_field(element, label_text):
-                    continue
-
-                tag = await element.evaluate("el => el.tagName.toLowerCase()")
-                input_type = ""
-                if tag == "input":
-                    input_type = (await element.get_attribute("type") or "text").lower()
-
-                # Determine field type and extract options
-                field_type = "text"
-                options = []
-
-                if tag == "select":
-                    field_type = "select"
-                    opt_els = await element.query_selector_all("option")
-                    for opt_el in opt_els:
-                        t = (await opt_el.text_content() or "").strip()
-                        if t and t.lower() not in (
-                            "select", "select an option", "-- select --",
-                            "choose", "please select", "",
-                        ):
-                            options.append(t)
-                elif input_type == "radio":
-                    field_type = "radio"
-                elif input_type == "checkbox":
-                    field_type = "checkbox"
-                    options = ["Yes", "No"]
-                elif tag == "textarea":
-                    field_type = "textarea"
-
-                manifest.append({
-                    "label": label_text,
-                    "field_type": field_type,
-                    "options": options,
-                    "element": element,
-                    "tag": tag,
-                    "input_type": input_type,
-                })
+                if await el.is_visible():
+                    visible.append(el)
             except Exception:
                 continue
+
+        if visible:
+            elements = visible
+            break
+
+        await page.wait_for_timeout(1000)
+
+    # --- Build manifest from discovered elements ---
+    manifest = []
+
+    for element in elements:
+        try:
+            label_text = await _get_field_label(element, page)
+            if await _should_skip_field(element, label_text):
+                continue
+
+            tag = await element.evaluate("el => el.tagName.toLowerCase()")
+            input_type = ""
+            if tag == "input":
+                input_type = (await element.get_attribute("type") or "text").lower()
+
+            # Determine field type and extract options
+            field_type = "text"
+            options = []
+
+            if tag == "select":
+                field_type = "select"
+                opt_els = await element.query_selector_all("option")
+                for opt_el in opt_els:
+                    t = (await opt_el.text_content() or "").strip()
+                    if t and t.lower() not in (
+                        "select", "select an option", "-- select --",
+                        "choose", "please select", "",
+                    ):
+                        options.append(t)
+            elif input_type == "radio":
+                field_type = "radio"
+            elif input_type == "checkbox":
+                field_type = "checkbox"
+                options = ["Yes", "No"]
+            elif tag == "textarea":
+                field_type = "textarea"
+
+            manifest.append({
+                "label": label_text,
+                "field_type": field_type,
+                "options": options,
+                "element": element,
+                "tag": tag,
+                "input_type": input_type,
+            })
+        except Exception:
+            continue
 
     return manifest
 
@@ -575,7 +637,7 @@ async def _handle_email_verification(page, ats_email):
 
 
 def _build_form_fill_prompt(fields, intake, profile, job_title):
-    """Build the Ollama prompt for batch-matching form fields to candidate answers."""
+    """Build the OpenRouter prompt for batch-matching form fields to candidate answers."""
     # Merge candidate data from profile.json and intake_form.json
     name = profile.get("name", "")
     parts = name.split() if name else []
@@ -632,11 +694,7 @@ def _build_form_fill_prompt(fields, intake, profile, job_title):
             desc["options"] = f["options"]
         fields_for_prompt.append(desc)
 
-    # Detect qwen model for /no_think prefix
-    ollama_model = os.getenv("OLLAMA_MODEL", "qwen3:8b").lower()
-    think_prefix = "/no_think\n" if "qwen" in ollama_model else ""
-
-    prompt = f"""{think_prefix}You are a job application form filler. Given candidate data and form fields, return the correct answer for each field.
+    prompt = f"""You are a job application form filler. Given candidate data and form fields, return the correct answer for each field.
 
 ## Candidate Data
 {json.dumps(candidate_data, indent=2)}
@@ -664,7 +722,7 @@ def _build_form_fill_prompt(fields, intake, profile, job_title):
 
 
 def _ollama_match_fields(fields, intake, profile, job_title):
-    """Use Ollama to batch-match form fields to candidate answers.
+    """Use OpenRouter to batch-match form fields to candidate answers.
 
     Returns dict mapping field label -> answer string, or None if unavailable.
     """
@@ -672,10 +730,10 @@ def _ollama_match_fields(fields, intake, profile, job_title):
         return None
 
     prompt = _build_form_fill_prompt(fields, intake, profile, job_title)
-    result = ollama_json(prompt, max_tokens=2000)
+    result = ollama_json(prompt, model=MODEL_FORM_FILL, max_tokens=2000)
 
     if not result or not isinstance(result, dict):
-        alert("Ollama Form Fill", "No valid response from Ollama", "warning")
+        alert("OpenRouter Form Fill", "No valid response from OpenRouter", "warning")
         return None
 
     # Build lookup from label -> field info for option validation
@@ -714,7 +772,7 @@ def _ollama_match_fields(fields, intake, profile, job_title):
                 if matched_option:
                     answer = matched_option
                 else:
-                    alert("Ollama Form Fill",
+                    alert("OpenRouter Form Fill",
                           f"Skipping '{label}': '{answer}' not in options", "warning")
                     continue
 
@@ -722,7 +780,7 @@ def _ollama_match_fields(fields, intake, profile, job_title):
         original_label = field_info["label"] if field_info else label
         validated[original_label] = answer
 
-    alert("Ollama Form Fill", f"Matched {len(validated)}/{len(fields)} fields")
+    alert("OpenRouter Form Fill", f"Matched {len(validated)}/{len(fields)} fields")
     return validated
 
 
@@ -760,10 +818,25 @@ async def _ask_admin_external(label, page, job_title, field_type, options, ask_c
     return answer
 
 
-async def _fill_page_fields(page, intake, resume_path, ask_callback, job_title):
+async def _keepalive_loop(page):
+    """Subtle scroll to prevent session timeout during Q&A wait."""
+    try:
+        while True:
+            await asyncio.sleep(30)
+            try:
+                await page.evaluate("window.scrollBy(0, 1); window.scrollBy(0, -1);")
+            except Exception:
+                break
+    except asyncio.CancelledError:
+        pass
+
+
+async def _fill_page_fields(page, intake, resume_path, ask_callback, job_title,
+                             batch_ask_callback=None, job_url="", job_id="",
+                             page_num=0):
     """Scan and fill all visible form fields on the current page.
 
-    Uses a fallback chain: Ollama -> regex patterns -> learned answers -> Telegram Q&A.
+    Uses a fallback chain: OpenRouter -> regex patterns -> learned answers -> Telegram Q&A.
     Returns (filled_count, unfilled_count, asked_count).
     """
     filled = 0
@@ -776,64 +849,141 @@ async def _fill_page_fields(page, intake, resume_path, ask_callback, job_title):
     # Step 2a: Pre-match ATS login/signup fields (email + password from env)
     ats_answers = _match_ats_login_fields(manifest)
 
-    # Step 2b: Batch-match remaining fields via Ollama (if available and enabled)
-    use_ollama = os.getenv("OLLAMA_FORM_FILL", "true").lower() == "true"
+    # Step 2b: Batch-match remaining fields via OpenRouter (if available and enabled)
+    use_ollama = os.getenv("OPENROUTER_FORM_FILL", "true").lower() == "true"
     ollama_answers = {}
     if use_ollama:
         profile = _load_profile()
         ollama_answers = _ollama_match_fields(manifest, intake, profile, job_title) or {}
 
-    # Step 3: Fill each field using fallback chain
+    # Step 3: First pass — fill fields using stages 0-2, collect unknowns
+    answers_map = {}  # label -> answer (resolved so far)
+    unknown_fields = []  # field_info dicts that still need answers
+
+    for field_info in manifest:
+        label_text = field_info["label"]
+        input_type = field_info["input_type"]
+
+        # Handle file upload (resume) — not part of Q&A
+        if input_type == "file":
+            if resume_path and os.path.exists(resume_path):
+                try:
+                    await field_info["element"].set_input_files(resume_path)
+                    await asyncio.sleep(get_human_delay("click"))
+                    alert("External Fill", f"  Uploaded resume: {label_text}")
+                    filled += 1
+                except Exception as e:
+                    alert("External Fill", f"  Resume upload failed: {e}", "warning")
+                    unfilled += 1
+            continue
+
+        # Fallback 0: ATS credentials
+        answer = ats_answers.get(label_text, "")
+
+        # Fallback 1: OpenRouter answer
+        if not answer:
+            answer = ollama_answers.get(label_text, "")
+
+        # Fallback 2: Regex patterns + custom + learned answers
+        if not answer:
+            answer = _match_field_to_answer(label_text, intake)
+
+        if answer:
+            answers_map[label_text] = answer
+        else:
+            unknown_fields.append(field_info)
+
+    # Step 4: Batch-ask all unknowns via Telegram (or fall back to per-field)
+    if unknown_fields:
+        if batch_ask_callback:
+            # Save session snapshot before pausing for Q&A
+            snapshot = SessionSnapshot(job_id or "external")
+            filled_so_far = {k: v for k, v in answers_map.items()}
+            await snapshot.save(page, filled_so_far, page_num)
+
+            # Take screenshot for context
+            os.makedirs(SCREENSHOTS_DIR, exist_ok=True)
+            screenshot_path = os.path.join(SCREENSHOTS_DIR, "batch_ask_external.png")
+            await page.screenshot(path=screenshot_path, full_page=False)
+
+            # Build field descriptors for batch callback
+            batch_fields = [
+                {
+                    "label": fi["label"],
+                    "type": fi["field_type"],
+                    "options": fi["options"],
+                }
+                for fi in unknown_fields
+            ]
+
+            # Keep page alive while waiting for admin replies
+            keepalive_task = asyncio.create_task(_keepalive_loop(page))
+            try:
+                batch_answers = await batch_ask_callback(
+                    job_title, job_url, batch_fields, screenshot_path,
+                )
+            finally:
+                keepalive_task.cancel()
+                try:
+                    await keepalive_task
+                except asyncio.CancelledError:
+                    pass
+
+            # Map batch replies back to fields
+            if batch_answers:
+                for fi, raw_answer in zip(unknown_fields, batch_answers):
+                    if not raw_answer or raw_answer.strip().lower() == "/skip":
+                        continue
+                    answer = raw_answer.strip()
+                    # Resolve numbered option answers
+                    if fi["options"] and answer.isdigit():
+                        idx = int(answer) - 1
+                        if 0 <= idx < len(fi["options"]):
+                            answer = fi["options"][idx]
+                    answers_map[fi["label"]] = answer
+                    _save_learned_answer(fi["label"], answer)
+                    alert("Learned", f"Saved answer for '{fi['label']}': {answer}")
+                    asked += 1
+
+        elif ask_callback:
+            # Fallback: per-field Telegram Q&A (original behavior)
+            for fi in unknown_fields:
+                admin_answer = await _ask_admin_external(
+                    fi["label"], page, job_title,
+                    fi["field_type"], fi["options"],
+                    ask_callback,
+                )
+                if admin_answer:
+                    answers_map[fi["label"]] = admin_answer
+                    _save_learned_answer(fi["label"], admin_answer)
+                    alert("Learned", f"Saved answer for '{fi['label']}': {admin_answer}")
+                    asked += 1
+
+    # Step 4.5: Auto-check agreement/consent checkboxes
+    for field_info in manifest:
+        label_lower = field_info["label"].lower()
+        if field_info["input_type"] == "checkbox" and field_info["label"] not in answers_map:
+            if any(kw in label_lower for kw in _AGREE_LABELS):
+                answers_map[field_info["label"]] = "yes"
+
+    # Step 5: Fill all fields using resolved answers
     for field_info in manifest:
         element = field_info["element"]
         label_text = field_info["label"]
         tag = field_info["tag"]
         input_type = field_info["input_type"]
 
+        if input_type == "file":
+            continue  # already handled above
+
+        answer = answers_map.get(label_text, "")
+        if not answer:
+            unfilled += 1
+            alert("External Fill", f"  Unfilled: {label_text}", "warning")
+            continue
+
         try:
-            # Handle file upload (resume)
-            if input_type == "file":
-                if resume_path and os.path.exists(resume_path):
-                    try:
-                        await element.set_input_files(resume_path)
-                        await asyncio.sleep(get_human_delay("click"))
-                        alert("External Fill", f"  Uploaded resume: {label_text}")
-                        filled += 1
-                    except Exception as e:
-                        alert("External Fill", f"  Resume upload failed: {e}", "warning")
-                        unfilled += 1
-                continue
-
-            # Fallback 0: ATS credentials (email/password fields)
-            answer = ats_answers.get(label_text, "")
-
-            # Fallback 1: Ollama answer
-            if not answer:
-                answer = ollama_answers.get(label_text, "")
-
-            # Fallback 2: Regex patterns + custom + learned answers
-            if not answer:
-                answer = _match_field_to_answer(label_text, intake)
-
-            # Fallback 3: Ask admin via Telegram
-            if not answer and ask_callback:
-                admin_answer = await _ask_admin_external(
-                    label_text, page, job_title,
-                    field_info["field_type"], field_info["options"],
-                    ask_callback,
-                )
-                if admin_answer:
-                    answer = admin_answer
-                    _save_learned_answer(label_text, answer)
-                    alert("Learned", f"Saved answer for '{label_text}': {answer}")
-                    asked += 1
-
-            if not answer:
-                unfilled += 1
-                alert("External Fill", f"  Unfilled: {label_text}", "warning")
-                continue
-
-            # Save Ollama-sourced answers to learned_answers for future cache
+            # Save OpenRouter-sourced answers to learned_answers for future cache
             if label_text in ollama_answers and answer == ollama_answers[label_text]:
                 _save_learned_answer(label_text, answer)
 
@@ -850,7 +1000,14 @@ async def _fill_page_fields(page, intake, resume_path, ask_callback, job_title):
                 if answer_lower in ("yes", "true", "agree", "i agree"):
                     is_checked = await element.is_checked()
                     if not is_checked:
-                        await element.click()
+                        try:
+                            await element.click(timeout=3000)
+                        except Exception:
+                            # Workday overlays intercept clicks — use force or JS
+                            try:
+                                await element.click(force=True, timeout=3000)
+                            except Exception:
+                                await element.evaluate("el => el.click()")
                         await asyncio.sleep(get_human_delay("click"))
                 filled += 1
                 alert("External Fill", f"  Filled checkbox: {label_text}")
@@ -906,7 +1063,11 @@ async def _click_page_button(page, text_patterns, timeout=3000):
                 if (pattern_lower in text or
                         pattern_lower in btn_value or
                         pattern_lower in btn_aria):
-                    await btn.click()
+                    try:
+                        await btn.click(timeout=5000)
+                    except Exception:
+                        # Workday uses overlay divs that intercept clicks — force click
+                        await btn.click(force=True, timeout=5000)
                     await asyncio.sleep(get_human_delay("page_load"))
                     return True
             except Exception:
@@ -915,7 +1076,7 @@ async def _click_page_button(page, text_patterns, timeout=3000):
     return False
 
 
-async def _apply_external_async(job, resume_path, ask_callback=None):
+async def _apply_external_async(job, resume_path, ask_callback=None, batch_ask_callback=None):
     """Full automated external application flow."""
     job_id = safe_job_id(job.get("job_id", "unknown"))
     title = job.get("title", "Unknown")
@@ -952,15 +1113,85 @@ async def _apply_external_async(job, resume_path, ask_callback=None):
 
         try:
             # Navigate to external application page
-            await page.goto(external_url, wait_until="domcontentloaded", timeout=30000)
+            try:
+                await page.goto(external_url, wait_until="domcontentloaded", timeout=30000)
+            except Exception as e:
+                alert("External Apply", f"Navigation warning: {e}", "warning")
+                # Page may still be usable even if domcontentloaded timed out
             await asyncio.sleep(get_human_delay("page_load"))
+            # Extra wait for Workday/heavy JS sites
+            await asyncio.sleep(3)
 
             # Screenshot initial page
             os.makedirs(SCREENSHOTS_DIR, exist_ok=True)
-            await page.screenshot(
-                path=os.path.join(SCREENSHOTS_DIR, f"external_{job_id}_start.png"),
-                full_page=False,
-            )
+            try:
+                await page.screenshot(
+                    path=os.path.join(SCREENSHOTS_DIR, f"external_{job_id}_start.png"),
+                    full_page=False,
+                )
+            except Exception as e:
+                alert("External Apply", f"Screenshot failed: {e}", "warning")
+
+            # Dismiss cookie banners before interacting
+            for cookie_sel in [
+                'button:has-text("Accept Cookies")', 'button:has-text("Accept")',
+                'button:has-text("Accept All")', '[data-automation-id="legalNoticeAcceptButton"]',
+            ]:
+                try:
+                    btn = await page.query_selector(cookie_sel)
+                    if btn and await btn.is_visible():
+                        await btn.click()
+                        await asyncio.sleep(1)
+                        break
+                except Exception:
+                    continue
+
+            # Click "Apply" button on job description pages (Workday, Greenhouse, etc.)
+            # The external URL often lands on the job posting, not the form itself.
+            for apply_sel in [
+                '[data-automation-id="adventureButton"]',  # Workday
+                'a:has-text("Apply")', 'button:has-text("Apply")',
+                'a:has-text("Apply Now")', 'button:has-text("Apply Now")',
+                'a:has-text("Apply for this job")', 'button:has-text("Apply for this job")',
+                '[data-automation-id="jobPostingApplyButton"]',
+            ]:
+                try:
+                    btn = await page.query_selector(apply_sel)
+                    if btn and await btn.is_visible():
+                        alert("External Apply", "Clicking Apply button to start application...")
+                        await btn.click()
+                        await asyncio.sleep(get_human_delay("page_load"))
+                        await asyncio.sleep(3)
+                        break
+                except Exception:
+                    continue
+
+            # Workday shows "Apply Manually" / "Autofill with Resume" / "Use Last Application"
+            # after clicking Apply. Navigate to the Apply Manually href directly
+            # (clicking doesn't always work — Workday uses <a> links, not JS buttons).
+            for manual_sel in [
+                '[data-automation-id="applyManually"]',
+                'a:has-text("Apply Manually")',
+                'button:has-text("Apply Manually")',
+                'button:has-text("Apply without")',
+            ]:
+                try:
+                    btn = await page.query_selector(manual_sel)
+                    if btn and await btn.is_visible():
+                        href = await btn.get_attribute("href")
+                        if href:
+                            # Navigate directly — clicking <a> in modals is unreliable
+                            full_url = href if href.startswith("http") else f"{page.url.split('/job/')[0]}{href}"
+                            alert("External Apply", f"Navigating to Apply Manually form...")
+                            await page.goto(full_url, wait_until="domcontentloaded", timeout=30000)
+                        else:
+                            alert("External Apply", "Clicking 'Apply Manually'...")
+                            await btn.click()
+                        await asyncio.sleep(get_human_delay("page_load"))
+                        await asyncio.sleep(3)
+                        break
+                except Exception:
+                    continue
 
             # Multi-page form loop (max 15 pages as safety)
             submitted = False
@@ -979,9 +1210,73 @@ async def _apply_external_async(job, resume_path, ask_callback=None):
                         alert("External Apply", "Email verified, re-processing page...")
                         continue
 
+                # Detect page type: login vs signup vs application
+                page_url = page.url.lower()
+                is_login_page = any(kw in page_url for kw in [
+                    "/login", "/signin", "/sign-in", "/sso", "/auth",
+                ])
+                is_signup_page = any(kw in page_url for kw in [
+                    "/register", "/signup", "/sign-up", "/create-account",
+                ])
+                has_password_fields = len(
+                    await page.query_selector_all('input[type="password"]')
+                ) > 0
+                has_confirm_password = await page.query_selector(
+                    'input[name*="confirm"], input[autocomplete="new-password"]'
+                )
+
+                # Check page text for account-already-exists or verification messages
+                try:
+                    page_text_check = (await page.inner_text("body")).lower()[:2000]
+                except Exception:
+                    page_text_check = ""
+
+                if any(phrase in page_text_check for phrase in [
+                    "account already exists", "already registered", "email is already in use",
+                    "already have an account", "existing account", "email already",
+                ]):
+                    alert("External Apply", "  Account already exists — switching to Sign In...")
+                    signed_in = False
+                    # Try finding a Sign In link with href (navigate directly)
+                    for sign_in_sel in [
+                        'a:has-text("Sign In")', 'a:has-text("Log In")',
+                        '[data-automation-id="signInLink"]',
+                    ]:
+                        try:
+                            link = await page.query_selector(sign_in_sel)
+                            if link and await link.is_visible():
+                                href = await link.get_attribute("href")
+                                if href:
+                                    full = href if href.startswith("http") else f"https://{page.url.split('/')[2]}{href}"
+                                    await page.goto(full, wait_until="domcontentloaded", timeout=30000)
+                                    signed_in = True
+                                else:
+                                    await link.click()
+                                    signed_in = True
+                                await asyncio.sleep(3)
+                                break
+                        except Exception:
+                            continue
+                    if not signed_in:
+                        # Workday fallback: replace /applyManually with /signIn in URL
+                        current = page.url
+                        if "applyManually" in current:
+                            sign_in_url = current.replace("applyManually", "signIn")
+                            alert("External Apply", "  Navigating to Workday sign-in URL...")
+                            await page.goto(sign_in_url, wait_until="domcontentloaded", timeout=30000)
+                            await asyncio.sleep(3)
+                    continue  # Re-enter loop on the sign-in page
+
+                if is_signup_page or (has_confirm_password and has_password_fields):
+                    alert("External Apply", "  Signup page detected, creating account...")
+                elif is_login_page or (has_password_fields and not has_confirm_password):
+                    alert("External Apply", "  Login page detected, filling credentials...")
+
                 # Fill all fields on current page
                 filled, unfilled, asked = await _fill_page_fields(  # pyre-ignore[29]
                     page, intake, resume_path, ask_callback, job_title,
+                    batch_ask_callback=batch_ask_callback,
+                    job_url=job.get("job_url", ""), job_id=job_id,
                 )
                 total_filled += filled
                 total_unfilled += unfilled
@@ -1070,7 +1365,7 @@ async def _apply_external_async(job, resume_path, ask_callback=None):
         return False
 
 
-async def apply_external_async(job, resume_path, max_per_day=15, ask_callback=None):
+async def apply_external_async(job, resume_path, max_per_day=15, ask_callback=None, batch_ask_callback=None):
     """Async entry point for external applications.
 
     Use from the Telegram bot's event loop.
@@ -1078,10 +1373,12 @@ async def apply_external_async(job, resume_path, max_per_day=15, ask_callback=No
     if not _check_daily_cap(max_per_day):
         alert("Daily Cap", "Maximum daily applications reached.", "warning")
         return False
-    return await _apply_external_async(job, resume_path, ask_callback=ask_callback)
+    if batch_ask_callback is None:
+        batch_ask_callback = _get_batch_ask_callback()
+    return await _apply_external_async(job, resume_path, ask_callback=ask_callback, batch_ask_callback=batch_ask_callback)
 
 
-def apply_external(job, resume_path, max_per_day=15, ask_callback=None):
+def apply_external(job, resume_path, max_per_day=15, ask_callback=None, batch_ask_callback=None):
     """Sync entry point for external applications.
 
     Use from run_daily.py.
@@ -1089,7 +1386,9 @@ def apply_external(job, resume_path, max_per_day=15, ask_callback=None):
     if not _check_daily_cap(max_per_day):
         alert("Daily Cap", "Maximum daily applications reached.", "warning")
         return False
-    return asyncio.run(_apply_external_async(job, resume_path, ask_callback=ask_callback))
+    if batch_ask_callback is None:
+        batch_ask_callback = _get_batch_ask_callback()
+    return asyncio.run(_apply_external_async(job, resume_path, ask_callback=ask_callback, batch_ask_callback=batch_ask_callback))
 
 
 if __name__ == "__main__":

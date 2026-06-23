@@ -3,6 +3,7 @@
 Common filtering, salary extraction, and Firecrawl result normalization
 used by search_indeed_jobs, search_glassdoor_jobs, and search_firecrawl_jobs.
 """
+from __future__ import annotations
 
 import re
 

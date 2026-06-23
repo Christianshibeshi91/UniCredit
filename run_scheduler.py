@@ -1,7 +1,7 @@
-"""30-minute job discovery scheduler.
+"""15-minute job discovery scheduler.
 
-Runs the daily job pipeline every 30 minutes with caps:
-  - Max 3 jobs per cycle
+Runs the daily job pipeline every 15 minutes with caps:
+  - Max 5 jobs per cycle
   - Max 15 jobs per day
   - Coffee breaks every 5-8 applications
 
@@ -13,7 +13,6 @@ Usage:
 import json
 import logging
 import os
-import random
 import subprocess
 import sys
 import time
@@ -28,15 +27,14 @@ load_dotenv(os.path.join(BASE_DIR, ".env"))
 import schedule  # pyre-ignore[21]
 
 from LinkedinAutomation.alert_user import alert  # pyre-ignore[21]
-from LinkedinAutomation.anti_detect import get_human_delay  # pyre-ignore[21]
 from LinkedinAutomation.tmp_cleanup import clean_old_screenshots  # pyre-ignore[21]
 
 RUN_STATE_PATH = os.path.join(BASE_DIR, ".tmp", "run_state.json")
 LOG_PATH = os.path.join(BASE_DIR, ".tmp", "scheduler.log")
 
-# Caps
-MAX_PER_CYCLE = 3
-MAX_PER_DAY = int(os.getenv("MAX_APPLICATIONS_PER_DAY", "15"))
+# Caps — no auto-apply, so we can process more per cycle
+MAX_PER_CYCLE = 10
+MAX_PER_DAY = int(os.getenv("MAX_JOBS_PER_DAY", "50"))
 
 # Setup logging
 os.makedirs(os.path.dirname(LOG_PATH), exist_ok=True)
@@ -94,14 +92,8 @@ def run_cycle():
             log.error(f"Child Error:\n{result.stderr}")
 
         new_count = _get_today_count()
-        applied_this_cycle = new_count - today_count
-        log.info(f"Cycle complete: {applied_this_cycle} new applications ({new_count}/{MAX_PER_DAY} today)")
-
-        # Coffee break after every 5-8 applications
-        if new_count > 0 and new_count % random.randint(5, 8) == 0:
-            coffee = get_human_delay("coffee_break")
-            log.info(f"Coffee break: {coffee:.0f}s")
-            time.sleep(coffee)
+        processed = new_count - today_count
+        log.info(f"Cycle complete: {processed} jobs processed ({new_count}/{MAX_PER_DAY} today)")
 
     except Exception as e:
         log.error(f"Cycle failed: {e}", exc_info=True)
@@ -111,7 +103,7 @@ def main():
     """Start the scheduler."""
     log.info("=" * 60)
     log.info(f"Scheduler started at {datetime.now().isoformat()}")
-    log.info(f"Cycle interval: 30 minutes")
+    log.info(f"Cycle interval: 10 minutes")
     log.info(f"Max per cycle: {MAX_PER_CYCLE}, Max per day: {MAX_PER_DAY}")
     log.info("=" * 60)
 
@@ -122,10 +114,10 @@ def main():
     # Run immediately on start
     run_cycle()
 
-    # Schedule every 30 minutes
-    schedule.every(30).minutes.do(run_cycle)
+    # Schedule every 10 minutes — fast discovery, no auto-apply
+    schedule.every(10).minutes.do(run_cycle)
 
-    log.info("Scheduler running. Next cycle in 30 minutes...")
+    log.info("Scheduler running. Next cycle in 10 minutes...")
 
     while True:
         schedule.run_pending()

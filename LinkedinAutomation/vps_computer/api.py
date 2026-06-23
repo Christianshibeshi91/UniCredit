@@ -3,6 +3,7 @@
 Designed for VPS with 32-64 cores, 128-512GB RAM, 10-25Gbps network.
 Runs multiple uvicorn workers to saturate available CPU cores.
 """
+from __future__ import annotations
 
 import asyncio
 import logging

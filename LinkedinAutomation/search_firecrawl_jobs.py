@@ -6,6 +6,7 @@ then scrapes full job details.
 
 Requires FIRECRAWL_API_KEY in .env.
 """
+from __future__ import annotations
 
 import os
 import re

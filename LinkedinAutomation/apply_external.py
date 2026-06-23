@@ -3,9 +3,9 @@
 Uses web_scraper's stealth BrowserEngine for authenticated access to job pages,
 with fast requests-based fallback for simple cases.
 """
+from __future__ import annotations
 
 import asyncio
-import json
 import os
 import re
 import html as html_mod
@@ -82,6 +82,47 @@ def _extract_from_html(text):
     return external_url
 
 
+def _extract_voyager_api(job_url):
+    """Extract external apply URL via LinkedIn's Voyager API (most reliable)."""
+    li_at = os.getenv("LINKEDIN_LI_AT", "")
+    if not li_at:
+        return ""
+
+    # Extract job ID from URL
+    m = re.search(r'/jobs/view/(?:[^/]*-)?(\d+)', job_url)
+    if not m:
+        return ""
+    job_id = m.group(1)
+
+    try:
+        session = requests.Session()
+        cookies = {"li_at": li_at, "JSESSIONID": '"ajax:0"'}
+        headers = {
+            "User-Agent": _UA,
+            "Csrf-Token": "ajax:0",
+        }
+        r = session.get(
+            f"https://www.linkedin.com/voyager/api/jobs/jobPostings/{job_id}",
+            headers=headers, cookies=cookies, timeout=15,
+        )
+        if r.status_code == 200:
+            data = r.json()
+            # Check OffsiteApply (external ATS)
+            apply_method = data.get("applyMethod", {})
+            offsite = apply_method.get("com.linkedin.voyager.jobs.OffsiteApply", {})
+            url = offsite.get("companyApplyUrl", "")
+            if url and "linkedin.com" not in url:
+                return url
+            # Fallback: top-level companyApplyUrl
+            url = data.get("companyApplyUrl", "")
+            if url and "linkedin.com" not in url:
+                return url
+    except Exception as e:
+        alert("External Apply", f"Voyager API failed: {e}", "warning")
+
+    return ""
+
+
 def _extract_requests(job_url):
     """Fast requests-based extraction (no browser needed)."""
     if not sanitize_url(job_url):
@@ -93,8 +134,8 @@ def _extract_requests(job_url):
     if li_at:
         try:
             session = requests.Session()
-            session.max_redirects = 10
-            cookies = {"li_at": li_at, "JSESSIONID": "ajax:0"}
+            session.max_redirects = 20
+            cookies = {"li_at": li_at, "JSESSIONID": '"ajax:0"'}
             headers = {
                 "User-Agent": _UA,
                 "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
@@ -129,7 +170,8 @@ async def _extract_browser(job_url):
     from web_scraper.browser import BrowserEngine  # pyre-ignore[21]
 
     li_at = os.getenv("LINKEDIN_LI_AT", "")
-    engine = BrowserEngine(headless=True, block_resources=True)
+    headless = os.getenv("HEADLESS", "true").lower() == "true"
+    engine = BrowserEngine(headless=headless, block_resources=True)
 
     try:
         page = await engine.start()
@@ -228,6 +270,14 @@ def extract_url(job):
     if not sanitize_url(job_url):
         alert("External Apply", "Blocked unsafe job URL", "error")
         return ""
+
+    # --- Fastest path: Voyager API (structured JSON, no HTML parsing) ---
+    external_url = _extract_voyager_api(job_url)
+    if external_url:
+        external_url = sanitize_url(external_url) or ""
+        if external_url:
+            alert("External Apply", f"Found (Voyager API): {external_url}")
+            return external_url
 
     # --- Fast path: requests-based ---
     external_url = _extract_requests(job_url)

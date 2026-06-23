@@ -3,6 +3,7 @@
 Uses requests to scrape LinkedIn's public people-search pages.
 Falls back to a manual search URL when scraping fails.
 """
+from __future__ import annotations
 
 import itertools
 import json

@@ -6,6 +6,7 @@ for JavaScript-heavy pages.
 
 Memory usage: ~20-50MB per worker vs ~400MB for Playwright.
 """
+from __future__ import annotations
 
 import asyncio
 import hashlib

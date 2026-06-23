@@ -3,6 +3,7 @@
 Replaces api.py with cluster-aware endpoints that use Redis task queue,
 vector store, and phase-based orchestration.
 """
+from __future__ import annotations
 
 import asyncio
 import logging

@@ -4,6 +4,7 @@ Routes Indeed searches through the Firecrawl API to bypass bot detection.
 Requires FIRECRAWL_API_KEY in .env.
 Falls back to direct scraping if Firecrawl is unavailable.
 """
+from __future__ import annotations
 
 import os
 import re

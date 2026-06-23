@@ -146,22 +146,33 @@ def aggregate_jobs(max_jobs: int = 15) -> list:
         search_fns.append(_search_custom_scraper)
 
     alert("Aggregator", f"Launching {len(search_fns)} platform searches in parallel...")
-    with ThreadPoolExecutor(max_workers=min(len(search_fns), 4)) as pool:
+    platform_results = {}
+    with ThreadPoolExecutor(max_workers=min(len(search_fns), 6)) as pool:
         futures = {pool.submit(fn): fn for fn in search_fns}
         for fut in as_completed(futures):
             try:
                 name, jobs = fut.result()
                 all_jobs.extend(jobs)
+                platform_results[name] = len(jobs)
                 alert("Aggregator", f"{name}: {len(jobs)} jobs")
             except Exception as e:
                 alert("Aggregator", f"Platform search failed: {e}", "error")
+
+    # Platform health summary
+    alert("Aggregator", "--- Platform Health Summary ---")
+    for name, count in platform_results.items():
+        level = "warning" if count == 0 else "info"
+        alert("Aggregator", f"{name}: {count} jobs", level)
 
     alert("Aggregator", f"Total before dedup: {len(all_jobs)}")
 
     # Cross-platform deduplication
     unique_jobs = _cross_platform_dedup(all_jobs)
 
-    alert("Aggregator", f"After cross-platform dedup: {len(unique_jobs)} unique jobs")
+    # Sort by freshness — freshest jobs processed first for early applications
+    unique_jobs.sort(key=lambda j: j.get("freshness_priority", 6))
+
+    alert("Aggregator", f"After cross-platform dedup: {len(unique_jobs)} unique jobs (sorted by freshness)")
     return unique_jobs[:max_jobs * 2]  # Return extra for within-platform dedup
 
 

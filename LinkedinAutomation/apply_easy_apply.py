@@ -6,6 +6,7 @@ Handles 1-5 page Easy Apply forms by:
 3. Typing human-like with anti-detection delays
 4. Auto-submitting without human intervention
 """
+from __future__ import annotations
 
 import asyncio
 import json
@@ -34,6 +35,16 @@ from LinkedinAutomation.anti_detect import (  # pyre-ignore[21]
     apply_stealth_to_context,
     random_browse,
 )
+from LinkedinAutomation.session_snapshot import SessionSnapshot  # pyre-ignore[21]
+
+# Deferred imports to avoid circular dependency (telegram_bot imports apply_easy_apply)
+def _get_batch_ask_callback():
+    from LinkedinAutomation.telegram_bot import get_batch_ask_callback  # pyre-ignore[21]
+    return get_batch_ask_callback()
+
+def _get_scheduler_batch_ask_callback():
+    from LinkedinAutomation.telegram_bot import get_scheduler_batch_ask_callback  # pyre-ignore[21]
+    return get_scheduler_batch_ask_callback()
 
 BASE_DIR = os.path.dirname(os.path.dirname(__file__))
 RUN_STATE_PATH = os.path.join(BASE_DIR, ".tmp", "run_state.json")
@@ -360,8 +371,137 @@ async def _ask_admin(label, page, job_title, field_type, options, ask_callback):
     return answer
 
 
-async def _fill_form_page(page, intake, resume_path, ask_callback=None, job_title=""):
+async def _detect_field_type_and_options(group, select_el, radios, checkbox):
+    """Detect the field type and available options for a form group.
+
+    Returns (field_type: str, options: list[str]).
+    """
+    field_type = "text"
+    options = []
+
+    if select_el:
+        field_type = "select"
+        opt_els = await select_el.query_selector_all("option")
+        for opt_el in opt_els:
+            t = (await opt_el.text_content() or "").strip()
+            if t and t.lower() not in ("select an option", "-- select --", ""):
+                options.append(t)
+    elif radios:
+        field_type = "radio"
+        labels_els = await group.query_selector_all("label")
+        for lbl in labels_els:
+            t = (await lbl.text_content() or "").strip()
+            if t:
+                options.append(t)
+    elif checkbox:
+        field_type = "checkbox"
+        options = ["Yes", "No"]
+
+    return field_type, options
+
+
+async def _fill_single_field(page, group, select_el, radios, text_input,
+                             checkbox, label_text, answer, intake):
+    """Fill a single form field given its detected element references.
+
+    Returns True/str on success, False on failure.
+    """
+    if select_el:
+        success = await _handle_select(page, select_el, answer)
+        await asyncio.sleep(get_human_delay("between_fields"))
+        return success
+
+    if radios:
+        success = await _handle_radio_buttons(page, group, answer)
+        await asyncio.sleep(get_human_delay("between_fields"))
+        return success
+
+    if text_input:
+        current_val = await text_input.input_value()
+        if current_val and current_val.strip():
+            return "already_filled"
+        await _fill_text_field(page, text_input, answer, intake)
+        await asyncio.sleep(get_human_delay("between_fields"))
+        return True
+
+    if checkbox:
+        answer_lower = answer.lower()
+        if answer_lower in ("yes", "true", "agree", "i agree"):
+            is_checked = await checkbox.is_checked()
+            if not is_checked:
+                await checkbox.click()
+                await asyncio.sleep(get_human_delay("click"))
+        return True
+
+    return False
+
+
+async def _fill_field_by_label(page, label_text, answer, intake):
+    """Last-resort: find a field by scanning all form groups for a matching label.
+
+    Used when DOM element references are stale after a page restore.
+    Returns True on success, False on failure.
+    """
+    form_groups = await page.query_selector_all(
+        ".jobs-easy-apply-form-section__grouping, "
+        ".fb-dash-form-element, "
+        "[data-test-form-element], "
+        ".artdeco-text-input, "
+        ".jobs-easy-apply-form-element"
+    )
+    if not form_groups:
+        form_groups = await page.query_selector_all(
+            "div.mt2, div.mb2, div.mv2, .form-component"
+        )
+
+    for group in form_groups:
+        try:
+            lbl_el = await group.query_selector(
+                "label, .fb-dash-form-element__label, "
+                "[data-test-form-element-label], span.t-14"
+            )
+            lbl = (await lbl_el.text_content() or "").strip() if lbl_el else ""
+            if lbl != label_text:
+                continue
+
+            s_el = await group.query_selector("select")
+            r_els = await group.query_selector_all("input[type='radio']")
+            t_inp = await group.query_selector(
+                "input[type='text'], input[type='email'], input[type='tel'], "
+                "input[type='number'], input[type='url'], input:not([type]), textarea"
+            )
+            cb = await group.query_selector("input[type='checkbox']")
+            return await _fill_single_field(
+                page, group, s_el, r_els, t_inp, cb, label_text, answer, intake,
+            )
+        except Exception:
+            continue
+    return False
+
+
+async def _keepalive_loop(page):
+    """Subtle scroll activity to prevent browser session timeout while waiting for Q&A."""
+    try:
+        while True:
+            await asyncio.sleep(30)
+            try:
+                await page.evaluate("window.scrollBy(0, 1); window.scrollBy(0, -1);")
+            except Exception:
+                break  # page died
+    except asyncio.CancelledError:
+        pass
+
+
+async def _fill_form_page(page, intake, resume_path, ask_callback=None,
+                          batch_ask_callback=None, job_title="", job_url="",
+                          job_id="", page_num=0):
     """Scan and fill all visible form fields on the current Easy Apply page.
+
+    Two-pass approach:
+      Pass 1 - Fill all fields that match intake/learned answers, collect unknowns.
+      Pass 2 - If unknowns remain and batch_ask_callback is available, send ONE
+               batched Telegram message. Falls back to per-field _ask_admin if
+               batch mode is unavailable.
 
     Returns list of (label, filled_status) for logging.
     """
@@ -392,6 +532,12 @@ async def _fill_form_page(page, intake, resume_path, ask_callback=None, job_titl
     if not form_groups:
         form_groups = await page.query_selector_all("div.mt2, div.mb2, div.mv2, .form-component")
 
+    # ------------------------------------------------------------------
+    # Pass 1: Fill known fields, collect unknowns
+    # ------------------------------------------------------------------
+    filled_fields = {}   # label -> answer  (for session snapshot)
+    unknown_fields = []  # dicts describing each unknown field
+
     for group in form_groups:
         try:
             # Get the label text
@@ -421,7 +567,7 @@ async def _fill_form_page(page, intake, resume_path, ask_callback=None, job_titl
             # Match label to answer
             answer = _match_field_to_answer(label_text, intake)
 
-            # Detect field type and options for potential admin Q&A
+            # Detect field type and available options
             select_el = await group.query_selector("select")
             radios = await group.query_selector_all("input[type='radio']")
             text_input = await group.query_selector(
@@ -430,85 +576,173 @@ async def _fill_form_page(page, intake, resume_path, ask_callback=None, job_titl
             )
             checkbox = await group.query_selector("input[type='checkbox']")
 
-            # If no match and ask_callback is available, ask admin via Telegram
-            if not answer and ask_callback:
-                field_type = "text"
-                options = []
-
-                if select_el:
-                    field_type = "select"
-                    opt_els = await select_el.query_selector_all("option")
-                    for opt_el in opt_els:
-                        t = (await opt_el.text_content() or "").strip()
-                        if t and t.lower() not in ("select an option", "-- select --", ""):
-                            options.append(t)
-                elif radios:
-                    field_type = "radio"
-                    labels_els = await group.query_selector_all("label")
-                    for lbl in labels_els:
-                        t = (await lbl.text_content() or "").strip()
-                        if t:
-                            options.append(t)
-                elif checkbox:
-                    field_type = "checkbox"
-                    options = ["Yes", "No"]
-
-                admin_answer = await _ask_admin(
-                    label_text, page, job_title, field_type, options, ask_callback
+            if answer:
+                # Fill immediately
+                ok = await _fill_single_field(
+                    page, group, select_el, radios, text_input, checkbox,
+                    label_text, answer, intake,
                 )
-                if admin_answer:
-                    answer = admin_answer
-                    # Save for future auto-fill
-                    _save_learned_answer(label_text, answer)
-                    alert("Learned", f"Saved answer for '{label_text}': {answer}")
-
-            if not answer:
-                unfilled.append((label_text, "no_match"))
-                continue
-
-            # Try to fill the field based on its type
-            # Check for select
-            if select_el:
-                success = await _handle_select(page, select_el, answer)
-                filled.append((label_text, success))  # pyre-ignore[29]
-                await asyncio.sleep(get_human_delay("between_fields"))
-                continue
-
-            # Check for radio buttons
-            if radios:
-                success = await _handle_radio_buttons(page, group, answer)
-                filled.append((label_text, success))  # pyre-ignore[29]
-                await asyncio.sleep(get_human_delay("between_fields"))
-                continue
-
-            # Check for text input or textarea
-            if text_input:
-                # Check if already filled
-                current_val = await text_input.input_value()
-                if current_val and current_val.strip():
-                    filled.append((label_text, "already_filled"))  # pyre-ignore[29,6]
-                    continue
-
-                await _fill_text_field(page, text_input, answer, intake)
-                filled.append((label_text, True))
-                await asyncio.sleep(get_human_delay("between_fields"))
-                continue
-
-            # Check for checkbox
-            if checkbox:
-                answer_lower = answer.lower()  # pyre-ignore[16]
-                if answer_lower in ("yes", "true", "agree", "i agree"):
-                    is_checked = await checkbox.is_checked()
-                    if not is_checked:
-                        await checkbox.click()
-                        await asyncio.sleep(get_human_delay("click"))
-                filled.append((label_text, True))
-                continue
-
-            unfilled.append((label_text, "no_input_found"))
+                filled.append((label_text, ok))
+                filled_fields[label_text] = answer
+            else:
+                # Collect metadata for batched Q&A
+                field_type, options = await _detect_field_type_and_options(
+                    group, select_el, radios, checkbox,
+                )
+                unknown_fields.append({
+                    "label": label_text,
+                    "type": field_type,
+                    "options": options,
+                    "group": group,
+                    "select_el": select_el,
+                    "radios": radios,
+                    "text_input": text_input,
+                    "checkbox": checkbox,
+                })
 
         except Exception as e:
             unfilled.append(("unknown_field", str(e)))
+
+    # ------------------------------------------------------------------
+    # Pass 2: Resolve unknowns via batched Telegram Q&A (or per-field fallback)
+    # ------------------------------------------------------------------
+    if unknown_fields and batch_ask_callback:
+        # Take screenshot before sending batch questions
+        os.makedirs(SCREENSHOTS_DIR, exist_ok=True)
+        screenshot_path = os.path.join(SCREENSHOTS_DIR, "ask_admin_batch.png")
+        await page.screenshot(path=screenshot_path, full_page=True)
+
+        # Save session snapshot so we can recover if the page dies
+        snapshot_mgr = SessionSnapshot(job_id or "unknown")
+        await snapshot_mgr.save(page, filled_fields, page_num)
+
+        # Start keepalive to prevent browser timeout during admin wait
+        keepalive_task = asyncio.create_task(_keepalive_loop(page))
+
+        try:
+            # Build field list for the batch callback (strip DOM references)
+            batch_fields = [
+                {"label": f["label"], "type": f["type"], "options": f["options"]}
+                for f in unknown_fields
+            ]
+            answers = await batch_ask_callback(
+                job_title, job_url, batch_fields, screenshot_path,
+            )
+
+            if answers:
+                # Verify the page is still alive before filling
+                if not await SessionSnapshot.is_page_alive(page):
+                    alert("Session", "Page died during Q&A wait, restoring...", "warning")
+                    page, snapshot = await snapshot_mgr.restore(page.context)
+                    # Re-fill known fields on the restored page
+                    restored_groups = await page.query_selector_all(
+                        ".jobs-easy-apply-form-section__grouping, "
+                        ".fb-dash-form-element, "
+                        "[data-test-form-element], "
+                        ".artdeco-text-input, "
+                        ".jobs-easy-apply-form-element"
+                    )
+                    if not restored_groups:
+                        restored_groups = await page.query_selector_all(
+                            "div.mt2, div.mb2, div.mv2, .form-component"
+                        )
+                    for rg in restored_groups:
+                        try:
+                            lbl_el = await rg.query_selector(
+                                "label, .fb-dash-form-element__label, "
+                                "[data-test-form-element-label], span.t-14"
+                            )
+                            lbl = (await lbl_el.text_content() or "").strip() if lbl_el else ""
+                            if lbl and lbl in filled_fields:
+                                s_el = await rg.query_selector("select")
+                                r_els = await rg.query_selector_all("input[type='radio']")
+                                t_inp = await rg.query_selector(
+                                    "input[type='text'], input[type='email'], "
+                                    "input[type='tel'], input[type='number'], "
+                                    "input[type='url'], input:not([type]), textarea"
+                                )
+                                cb = await rg.query_selector("input[type='checkbox']")
+                                await _fill_single_field(
+                                    page, rg, s_el, r_els, t_inp, cb,
+                                    lbl, filled_fields[lbl], intake,
+                                )
+                        except Exception:
+                            pass
+
+                # Inject batch answers into the unknown fields
+                for field_info, answer in zip(unknown_fields, answers):
+                    if not answer or answer.strip().lower() == "/skip":
+                        unfilled.append((field_info["label"], "skipped"))
+                        continue
+
+                    # Resolve numbered option answers
+                    if field_info["options"]:
+                        answer = _resolve_option_answer(answer, field_info["options"])
+
+                    # Re-locate field elements (may have changed after restore)
+                    grp = field_info["group"]
+                    try:
+                        s_el = await grp.query_selector("select")
+                        r_els = await grp.query_selector_all("input[type='radio']")
+                        t_inp = await grp.query_selector(
+                            "input[type='text'], input[type='email'], "
+                            "input[type='tel'], input[type='number'], "
+                            "input[type='url'], input:not([type]), textarea"
+                        )
+                        cb = await grp.query_selector("input[type='checkbox']")
+                        ok = await _fill_single_field(
+                            page, grp, s_el, r_els, t_inp, cb,
+                            field_info["label"], answer, intake,
+                        )
+                        filled.append((field_info["label"], ok))
+                    except Exception:
+                        # Group ref stale after restore — find by label scan
+                        ok = await _fill_field_by_label(
+                            page, field_info["label"], answer, intake,
+                        )
+                        filled.append((field_info["label"], ok))
+
+                    # Save for future auto-fill
+                    _save_learned_answer(field_info["label"], answer)
+                    alert("Learned", f"Saved answer for '{field_info['label']}': {answer}")
+            else:
+                # Batch returned None / empty — mark all as unfilled
+                for field_info in unknown_fields:
+                    unfilled.append((field_info["label"], "no_batch_reply"))
+        finally:
+            keepalive_task.cancel()
+            snapshot_mgr.delete()
+
+    elif unknown_fields and ask_callback:
+        # Fallback: per-field _ask_admin (original behaviour)
+        for field_info in unknown_fields:
+            admin_answer = await _ask_admin(
+                field_info["label"], page, job_title,
+                field_info["type"], field_info["options"], ask_callback,
+            )
+            if admin_answer:
+                try:
+                    ok = await _fill_single_field(
+                        page, field_info["group"],
+                        field_info["select_el"], field_info["radios"],
+                        field_info["text_input"], field_info["checkbox"],
+                        field_info["label"], admin_answer, intake,
+                    )
+                    filled.append((field_info["label"], ok))
+                except Exception:
+                    ok = await _fill_field_by_label(
+                        page, field_info["label"], admin_answer, intake,
+                    )
+                    filled.append((field_info["label"], ok))
+                _save_learned_answer(field_info["label"], admin_answer)
+                alert("Learned", f"Saved answer for '{field_info['label']}': {admin_answer}")
+            else:
+                unfilled.append((field_info["label"], "no_match"))
+
+    elif unknown_fields:
+        # No callback at all — just record as unfilled
+        for field_info in unknown_fields:
+            unfilled.append((field_info["label"], "no_match"))
 
     return filled, unfilled
 
@@ -533,7 +767,8 @@ async def _click_button(page, button_texts):
     return False
 
 
-async def _apply_async(job, resume_path, cover_letter_text, ask_callback=None):
+async def _apply_async(job, resume_path, cover_letter_text, ask_callback=None,
+                       batch_ask_callback=None):
     """Full automated Easy Apply flow."""
     job_id = safe_job_id(job.get("job_id", "unknown"))
     job_url = job.get("job_url", "")
@@ -591,7 +826,11 @@ async def _apply_async(job, resume_path, cover_letter_text, ask_callback=None):
                 # Fill all fields on current page
                 filled, unfilled = await _fill_form_page(  # pyre-ignore[29,10]
                     page, intake, resume_path,
-                    ask_callback=ask_callback, job_title=f"{title} at {company}",
+                    ask_callback=ask_callback,
+                    batch_ask_callback=batch_ask_callback,
+                    job_title=f"{title} at {company}",
+                    job_url=job_url, job_id=job_id,
+                    page_num=page_num,
                 )
 
                 for label, status in filled:
@@ -704,7 +943,8 @@ async def _apply_async(job, resume_path, cover_letter_text, ask_callback=None):
         return False
 
 
-async def apply_async(job, resume_path, cover_letter, max_per_day=15, ask_callback=None):
+async def apply_async(job, resume_path, cover_letter, max_per_day=15,
+                      ask_callback=None, batch_ask_callback=None):
     """Async entry point for use inside the bot's event loop.
 
     Use this instead of apply() when calling from an already-running
@@ -713,10 +953,20 @@ async def apply_async(job, resume_path, cover_letter, max_per_day=15, ask_callba
     if not _check_daily_cap(max_per_day):
         alert("Daily Cap", "Maximum daily applications reached.", "warning")
         return False
-    return await _apply_async(job, resume_path, cover_letter, ask_callback=ask_callback)
+
+    # Auto-acquire batch callback if not provided
+    if batch_ask_callback is None:
+        batch_ask_callback = _get_batch_ask_callback()
+
+    return await _apply_async(
+        job, resume_path, cover_letter,
+        ask_callback=ask_callback,
+        batch_ask_callback=batch_ask_callback,
+    )
 
 
-def apply(job, resume_path, cover_letter, max_per_day=15, ask_callback=None):
+def apply(job, resume_path, cover_letter, max_per_day=15,
+          ask_callback=None, batch_ask_callback=None):
     """Apply to a job via LinkedIn Easy Apply. Fully automated (sync wrapper).
 
     Args:
@@ -725,6 +975,7 @@ def apply(job, resume_path, cover_letter, max_per_day=15, ask_callback=None):
         cover_letter: Cover letter text (logged but not always used in Easy Apply).
         max_per_day: Maximum applications per day.
         ask_callback: Optional async callback for asking admin about unknown fields.
+        batch_ask_callback: Optional async callback for batched Telegram Q&A.
 
     Returns:
         True if application was submitted, False otherwise.
@@ -743,12 +994,20 @@ def apply(job, resume_path, cover_letter, max_per_day=15, ask_callback=None):
         import concurrent.futures
 
         def _run_apply():  # pyre-ignore[53]
-            return asyncio.run(_apply_async(job, resume_path, cover_letter, ask_callback=ask_callback))
+            return asyncio.run(_apply_async(
+                job, resume_path, cover_letter,
+                ask_callback=ask_callback,
+                batch_ask_callback=batch_ask_callback,
+            ))
 
         with concurrent.futures.ThreadPoolExecutor() as pool:
             return pool.submit(_run_apply).result(timeout=300)  # pyre-ignore[6]
 
-    return asyncio.run(_apply_async(job, resume_path, cover_letter, ask_callback=ask_callback))
+    return asyncio.run(_apply_async(
+        job, resume_path, cover_letter,
+        ask_callback=ask_callback,
+        batch_ask_callback=batch_ask_callback,
+    ))
 
 
 if __name__ == "__main__":

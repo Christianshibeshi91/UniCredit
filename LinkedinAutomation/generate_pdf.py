@@ -1,4 +1,5 @@
 """Generate professional, ATS-friendly PDF resumes and cover letters."""
+from __future__ import annotations
 
 import os
 import re
@@ -274,15 +275,18 @@ def generate_resume_pdf(text: str, output_path: str) -> str:
             for line in skill_lines:
                 if ":" in line:
                     cat, items = line.split(":", 1)
+                    row_y = pdf.get_y()  # save row start
                     # Category label (bold, left column)
                     pdf.set_font("Helvetica", "B", 9)
-                    pdf.set_x(20)
+                    pdf.set_xy(20, row_y)
                     pdf.cell(label_col_w, 5, cat.strip() + ":")
                     # Items (regular, right column with wrapping)
                     pdf.set_font("Helvetica", size=9)
-                    pdf.set_x(20 + label_col_w)
+                    pdf.set_xy(20 + label_col_w, row_y)
                     pdf.multi_cell(items_col_w, 5, items.strip(), align="L")
-                    pdf.ln(1)
+                    # Ensure next row starts below whichever column was taller
+                    after_y = pdf.get_y()
+                    pdf.set_y(max(after_y, row_y + 5) + 1)
                 else:
                     pdf.set_font("Helvetica", size=9)
                     pdf.multi_cell(0, 5, line, align="L")
