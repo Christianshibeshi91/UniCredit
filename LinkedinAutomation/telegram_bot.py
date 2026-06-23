@@ -1582,7 +1582,7 @@ def send_job_notification(job_data: dict) -> bool:
 
     api_url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
     success = True
-    all_ids = get_all_chat_ids()
+    all_ids = ADMIN_CHAT_IDS
 
     for chat_id in all_ids:
         try:
