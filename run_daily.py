@@ -32,7 +32,6 @@ from LinkedinAutomation.find_connections import find  # pyre-ignore[21]
 from LinkedinAutomation.log_to_sheets import log_job  # pyre-ignore[21]
 from LinkedinAutomation.mark_job_seen import mark_seen  # pyre-ignore[21]
 from LinkedinAutomation.telegram_bot import send_job_notification, send_early_alert  # pyre-ignore[21]
-from LinkedinAutomation.generate_daily_report import send_daily_report  # pyre-ignore[21]
 from LinkedinAutomation.follow_up_tracker import check_follow_ups  # pyre-ignore[21]
 from LinkedinAutomation.interview_prep import check_interview_statuses  # pyre-ignore[21]
 from LinkedinAutomation.upload_to_drive import upload_file as drive_upload  # pyre-ignore[21]
@@ -311,12 +310,7 @@ def main():
     except Exception as e:
         alert("Interview Prep Error", str(e), "warning")
 
-    # Step 6: Send daily analytics report
-    alert("Step 6", "Sending daily analytics report...")
-    try:
-        send_daily_report()
-    except Exception as e:
-        alert("Report Error", str(e), "warning")
+
 
 
 if __name__ == "__main__":
